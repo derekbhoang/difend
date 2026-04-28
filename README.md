@@ -51,5 +51,61 @@ The final report should include:
 
 Core principle: review the diff first, trace context only when needed, and escalate uncertain security risks to a human.
 
+## Roadmap
+
+### 28/04/2026
+- Agreement on final idea.
+- Find resouces for implementation.
+
+### 29/04/2026
+- Implement the first version of the `difend diff_vul_check` command.
+- Implement code diff capture from the current Git working tree.
+- Define the core `difend SDK` interface:
+  - input: repository path and diff
+  - output: structured security report
+- Build the automated gates runner.
+- Add initial automated gates:
+  - secrets scanning
+  - dependency change detection
+  - simple injection pattern checks
+  - risky authentication or authorisation change detection
+- Define a shared finding format with file, line, severity, evidence, gate name, and recommendation.
+- Combine automated gate results into one partial report.
+- Test the command against small sample diffs.
+
+Goal for the day: `difend diff_vul_check` can capture a diff, run basic automated gates, and print a structured vulnerability report.
+
+### 30/04/2026
+- Implement the security risk review direction.
+- Detect when changed code may require human verification, especially changes involving:
+  - authentication
+  - authorisation
+  - privilege boundaries
+  - secrets
+  - sensitive data
+  - database queries
+  - file access
+  - payments
+  - cryptography
+  - session management
+- Add related-file tracing from the diff:
+  - called functions
+  - imported modules
+  - route handlers
+  - auth helpers
+  - data models
+  - related tests
+- Generate a manual review checklist when suspicious security risk is found.
+- Merge automated gate findings and security risk findings into one final report.
+- Implement final statuses:
+  - `pass`
+  - `fail`
+  - `manual review required`
+- Polish CLI output for developer readability.
+- Run end-to-end tests on sample vulnerable diffs.
+- Document known limitations and next steps.
+
+Goal for the day: Difend can run the full two-direction workflow and produce a final diff-only security review report.
+
 ## Resources
 - [**Resource 1:** AI-Generated Code Security Risks - Why Vulnerabilities Increase 2.74x and How to Prevent Them](https://www.softwareseni.com/ai-generated-code-security-risks-why-vulnerabilities-increase-2-74x-and-how-to-prevent-them/)
