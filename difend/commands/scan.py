@@ -10,6 +10,7 @@ from difend.sdk import scan
 def run_scan(args: argparse.Namespace) -> int:
     report = scan()
     print(report.name)
+    print(f"Status: {report.status.value}")
     print(f"Unstaged diff: {_format_diff_state(report.diff.unstaged)}")
     print(f"Staged diff: {_format_diff_state(report.diff.staged)}")
     return 0

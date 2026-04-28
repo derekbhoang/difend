@@ -29,10 +29,22 @@ class GitDiffCapture:
     def __init__(self, repository_path: str | Path) -> None:
         self.repository_path = Path(repository_path)
 
-    def capture(self) -> CodeDiff:
+    def capture(
+        self,
+        include_staged: bool = True,
+        include_unstaged: bool = True,
+    ) -> CodeDiff:
         return CodeDiff(
-            unstaged=self._run_git(["diff", "--no-ext-diff", "--unified=0"]),
-            staged=self._run_git(["diff", "--cached", "--no-ext-diff", "--unified=0"]),
+            unstaged=(
+                self._run_git(["diff", "--no-ext-diff", "--unified=0"])
+                if include_unstaged
+                else ""
+            ),
+            staged=(
+                self._run_git(["diff", "--cached", "--no-ext-diff", "--unified=0"])
+                if include_staged
+                else ""
+            ),
         )
 
     def _run_git(self, args: list[str]) -> str:
