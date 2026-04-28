@@ -26,7 +26,7 @@ difend scan
 ```
 
 3. The command triggers the `difend SDK`.
-4. The `difend SDK` captures the current code diff from the Git working tree.
+4. The `difend SDK` captures the current code diff from the Git working tree, including staged changes, unstaged changes, and Git-reported untracked text files.
 5. Difend creates a scan output folder for the current run.
 6. The SDK sends the diff into two asynchronous security review directions:
 
@@ -101,6 +101,26 @@ Suggested file responsibilities:
 - `report.json`: structured machine-readable report for future integrations.
 
 Core principle: review the diff first, trace context only when needed, and escalate uncertain security risks to a human.
+
+## Local Development
+
+Install Difend in editable mode:
+
+```bash
+pip install -e .
+```
+
+Run a scan from inside a Git repository:
+
+```bash
+difend scan
+```
+
+Run the test suite:
+
+```bash
+python -m unittest discover
+```
 
 ## Roadmap
 
