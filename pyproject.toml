@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "difend"
+version = "0.1.0"
+description = "Diff-first security review CLI and SDK for AI-assisted code changes."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+difend = "difend.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["difend*"]
