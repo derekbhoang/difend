@@ -1,5 +1,6 @@
 """Difend package."""
 
+from difend.bundle import ScanBundle, ScanBundleRequest, ScanBundleWriter
 from difend.diff import CodeDiff, DiffCaptureError, GitDiffCapture
 from difend.sdk import DifendSDK, ScanReport, ScanRequest, ScanStatus, scan
 
@@ -10,6 +11,9 @@ __all__ = [
     "DiffCaptureError",
     "DifendSDK",
     "GitDiffCapture",
+    "ScanBundle",
+    "ScanBundleRequest",
+    "ScanBundleWriter",
     "ScanReport",
     "ScanRequest",
     "ScanStatus",

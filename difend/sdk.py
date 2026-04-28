@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from difend.bundle import ScanBundleWriter, ScanBundleRequest
 from difend.diff import CodeDiff, GitDiffCapture
 
 
@@ -78,19 +79,26 @@ class DifendSDK:
     """Reusable SDK entry point for running Difend workflows."""
 
     def scan(self, request: ScanRequest) -> ScanReport:
-        scan_id = "current"
-        output_folder = request.output_root / scan_id
         diff = GitDiffCapture(request.repository_path).capture(
             include_staged=request.include_staged,
             include_unstaged=request.include_unstaged,
         )
+        status = ScanStatus.PASS
+        bundle = ScanBundleWriter().write(
+            ScanBundleRequest(
+                repository_path=request.repository_path,
+                output_root=request.output_root,
+                status=status.value,
+                diff=diff,
+            )
+        )
 
         return ScanReport(
             name="difend scan",
-            scan_id=scan_id,
+            scan_id=bundle.scan_id,
             repository_path=request.repository_path,
-            output_folder=output_folder,
-            status=ScanStatus.PASS,
+            output_folder=bundle.output_folder,
+            status=status,
             diff=diff,
         )
 

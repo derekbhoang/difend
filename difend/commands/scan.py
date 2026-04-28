@@ -13,6 +13,8 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"Status: {report.status.value}")
     print(f"Unstaged diff: {_format_diff_state(report.diff.unstaged)}")
     print(f"Staged diff: {_format_diff_state(report.diff.staged)}")
+    print(f"Report written to: {report.output_folder}")
+    print(f"Next: ask Codex to read {report.output_folder / 'codex-instructions.md'}")
     return 0
 
 
