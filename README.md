@@ -20,7 +20,7 @@ Difend focuses only on the code diff. It does not try to review the whole reposi
 2. Developer runs:
 
 ```bash
-difend diff_vul_check
+difend scan
 ```
 
 3. The command triggers the `difend SDK`.
@@ -58,7 +58,7 @@ Core principle: review the diff first, trace context only when needed, and escal
 - Find resouces for implementation.
 
 ### 29/04/2026
-- Implement the first version of the `difend diff_vul_check` command.
+- Implement the first version of the `difend scan` command.
 - Implement code diff capture from the current Git working tree.
 - Define the core `difend SDK` interface:
   - input: repository path and diff
@@ -73,7 +73,7 @@ Core principle: review the diff first, trace context only when needed, and escal
 - Combine automated gate results into one partial report.
 - Test the command against small sample diffs.
 
-Goal for the day: `difend diff_vul_check` can capture a diff, run basic automated gates, and print a structured vulnerability report.
+Goal for the day: `difend scan` can capture a diff, run basic automated gates, and print a structured vulnerability report.
 
 ### 30/04/2026
 - Implement the security risk review direction.
