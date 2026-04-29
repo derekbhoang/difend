@@ -16,8 +16,27 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     scan_parser = subparsers.add_parser(
-        "scan",
+        "agent-scan",
         help="Scan the current Git diff.",
+    )
+    scan_parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable scan cache lookup and writes for this run.",
+    )
+    scan_parser.add_argument(
+        "--model",
+        help="OpenAI model to use for LLM-backed agent nodes.",
+    )
+    scan_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Return a nonzero exit code when manual review is required.",
+    )
+    scan_parser.add_argument(
+        "--agents",
+        action="store_true",
+        help="Print expanded per-agent execution details.",
     )
     scan_parser.set_defaults(handler=run_scan)
 

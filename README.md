@@ -12,13 +12,13 @@ Teams need a lightweight workflow that checks only the code diff, catches common
 
 Difend is designed as a diff-aware AI security review SDK with a CLI entry point. The CLI gives developers quick terminal feedback, while the SDK coordinates focused review agents and produces a persistent scan bundle that can be read by developers, security reviewers, Codex, or another AI coding assistant.
 
-The scan bundle is not only a security report. It is structured context for follow-up work. After an AI coding tool generates a code change, `difend scan` turns the current Git diff into Markdown and JSON files that explain what changed, which agents reviewed it, what problems were found, what needs manual review, and which files Codex should inspect next.
+The scan bundle is not only a security report. It is structured context for follow-up work. After an AI coding tool generates a code change, `difend agent-scan` turns the current Git diff into Markdown and JSON files that explain what changed, which agents reviewed it, what problems were found, what needs manual review, and which files Codex should inspect next.
 
 ### Product Shape
 
 Difend has three connected layers:
 
-- **CLI:** `difend scan` gives the developer immediate terminal feedback after a code change.
+- **CLI:** `difend agent-scan` gives the developer immediate terminal feedback after a code change.
 - **SDK:** the reusable scan engine captures diffs, coordinates review agents, creates findings, and writes scan bundles.
 - **Context bundle:** the generated `.md`, `.patch`, and `.json` files give Codex or another AI coding tool focused security context for deeper review, explanation, or remediation.
 
@@ -99,7 +99,16 @@ Difend focuses only on the code diff. It does not try to review the whole reposi
 2. Developer runs:
 
 ```bash
-difend scan
+difend agent-scan
+```
+
+Useful flags:
+
+```bash
+difend agent-scan --no-cache
+difend agent-scan --model gpt-5.4-mini
+difend agent-scan --strict
+difend agent-scan --agents
 ```
 
 3. The command triggers the `difend SDK`.
@@ -130,7 +139,7 @@ The terminal output should be short, readable, and useful during normal developm
 Example:
 
 ```text
-Difend scan started
+Difend agent-scan started
 
 Checking git diff... done
 Running Diff Classifier Agent... done

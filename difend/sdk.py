@@ -49,11 +49,13 @@ class ScanRequest:
         repository_path: str | Path = ".",
         output_root: str | Path = ".difend/runs",
         model: str | None = None,
+        use_cache: bool = True,
     ) -> "ScanRequest":
         return cls(
             repository_path=Path(repository_path),
             output_root=Path(output_root),
             model=model,
+            use_cache=use_cache,
         )
 
 
@@ -130,7 +132,7 @@ class DifendSDK:
         )
 
         return ScanReport(
-            name="difend scan",
+            name="difend agent-scan",
             scan_id=bundle.scan_id,
             repository_path=request.repository_path,
             output_folder=bundle.output_folder,
@@ -160,6 +162,7 @@ def scan(
     repository_path: str | Path = ".",
     output_root: str | Path = ".difend/runs",
     model: str | None = None,
+    use_cache: bool = True,
 ) -> ScanReport:
     """Run a Difend scan through the default SDK instance."""
 
@@ -167,5 +170,6 @@ def scan(
         repository_path=repository_path,
         output_root=output_root,
         model=model,
+        use_cache=use_cache,
     )
     return DifendSDK().scan(request)
