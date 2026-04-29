@@ -17,10 +17,15 @@ class CodeDiff:
 
     unstaged: str
     staged: str
+    untracked: str = ""
 
     @property
     def has_changes(self) -> bool:
-        return bool(self.unstaged.strip() or self.staged.strip())
+        return bool(
+            self.unstaged.strip()
+            or self.staged.strip()
+            or self.untracked.strip()
+        )
 
 
 class GitDiffCapture:
@@ -33,6 +38,7 @@ class GitDiffCapture:
         self,
         include_staged: bool = True,
         include_unstaged: bool = True,
+        include_untracked: bool = True,
     ) -> CodeDiff:
         return CodeDiff(
             unstaged=(
@@ -45,9 +51,40 @@ class GitDiffCapture:
                 if include_staged
                 else ""
             ),
+            untracked=(
+                self._capture_untracked_diff()
+                if include_untracked
+                else ""
+            ),
         )
 
-    def _run_git(self, args: list[str]) -> str:
+    def _capture_untracked_diff(self) -> str:
+        files = self._run_git(
+            ["ls-files", "--others", "--exclude-standard", "-z"],
+        ).split("\0")
+        patches = [
+            self._run_git(
+                [
+                    "diff",
+                    "--no-index",
+                    "--no-ext-diff",
+                    "--unified=0",
+                    "--",
+                    "/dev/null",
+                    path,
+                ],
+                allowed_return_codes=(0, 1),
+            )
+            for path in files
+            if path
+        ]
+        return "".join(patches)
+
+    def _run_git(
+        self,
+        args: list[str],
+        allowed_return_codes: tuple[int, ...] = (0,),
+    ) -> str:
         result = subprocess.run(
             ["git", *args],
             cwd=self.repository_path,
@@ -56,7 +93,7 @@ class GitDiffCapture:
             check=False,
         )
 
-        if result.returncode != 0:
+        if result.returncode not in allowed_return_codes:
             message = result.stderr.strip() or "Git command failed."
             raise DiffCaptureError(message)
 

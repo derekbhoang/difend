@@ -23,14 +23,14 @@ def capture_staged_diff():
     return run_git_command(["diff", "--cached", "--no-ext-diff", "--unified=0"])
 
 
-def capture_code_diff():
-    return {
-        "unstaged": capture_unstaged_diff(),
-        "staged": capture_staged_diff(),
-    }
-
-
 def main():
+
+    def capture_code_diff():
+        return {
+            "unstaged": capture_unstaged_diff(),
+            "staged": capture_staged_diff(),
+        }
+
     diff = capture_code_diff()
 
     print("=== Unstaged diff ===")

@@ -30,12 +30,15 @@ class ScanRequest:
         Capture staged changes from the Git index.
     include_unstaged:
         Capture unstaged working tree changes.
+    include_untracked:
+        Capture new files that have not been added to the Git index.
     """
 
     repository_path: Path
     output_root: Path = Path(".difend/runs")
     include_staged: bool = True
     include_unstaged: bool = True
+    include_untracked: bool = True
 
     @classmethod
     def from_path(
@@ -82,6 +85,7 @@ class DifendSDK:
         diff = GitDiffCapture(request.repository_path).capture(
             include_staged=request.include_staged,
             include_unstaged=request.include_unstaged,
+            include_untracked=request.include_untracked,
         )
         status = ScanStatus.PASS
         bundle = ScanBundleWriter().write(

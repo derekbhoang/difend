@@ -169,7 +169,7 @@ class ScanBundleWriter:
         )
 
     def _patch_text(self, diff: CodeDiff) -> str:
-        return diff.unstaged + diff.staged
+        return diff.unstaged + diff.staged + diff.untracked
 
     def _report_json(
         self,
@@ -185,6 +185,7 @@ class ScanBundleWriter:
                 "has_changes": request.diff.has_changes,
                 "unstaged_bytes": len(request.diff.unstaged.encode()),
                 "staged_bytes": len(request.diff.staged.encode()),
+                "untracked_bytes": len(request.diff.untracked.encode()),
             },
             "findings": [],
             "manual_review": [],
