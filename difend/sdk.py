@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from difend.agents import AutomatedGatesAgent
 from difend.bundle import ScanBundleWriter, ScanBundleRequest
 from difend.diff import CodeDiff, GitDiffCapture
+from difend.models import AutomatedGatesResult
 
 
 class ScanStatus(str, Enum):
@@ -68,6 +70,8 @@ class ScanReport:
         Final scan status.
     diff:
         Exact staged and unstaged diff content captured for the scan.
+    automated_gates:
+        Structured result returned by the Automated Gates Agent.
     """
 
     name: str
@@ -76,6 +80,7 @@ class ScanReport:
     output_folder: Path
     status: ScanStatus
     diff: CodeDiff
+    automated_gates: AutomatedGatesResult
 
 
 class DifendSDK:
@@ -87,13 +92,19 @@ class DifendSDK:
             include_unstaged=request.include_unstaged,
             include_untracked=request.include_untracked,
         )
-        status = ScanStatus.PASS
+        automated_gates = AutomatedGatesAgent().run(diff)
+        status = (
+            ScanStatus.FAIL
+            if automated_gates.findings
+            else ScanStatus.PASS
+        )
         bundle = ScanBundleWriter().write(
             ScanBundleRequest(
                 repository_path=request.repository_path,
                 output_root=request.output_root,
                 status=status.value,
                 diff=diff,
+                findings=automated_gates.findings,
             )
         )
 
@@ -104,6 +115,7 @@ class DifendSDK:
             output_folder=bundle.output_folder,
             status=status,
             diff=diff,
+            automated_gates=automated_gates,
         )
 
 

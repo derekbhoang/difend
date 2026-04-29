@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from difend.diff import CodeDiff
+from difend.models import Finding
 
 
 BUNDLE_FILE_NAMES = (
@@ -61,6 +62,7 @@ class ScanBundleRequest:
     output_root: Path
     status: str
     diff: CodeDiff
+    findings: tuple[Finding, ...] = ()
 
 
 class ScanBundleWriter:
@@ -76,7 +78,7 @@ class ScanBundleWriter:
         bundle.output_folder.mkdir(parents=True, exist_ok=False)
 
         self._write_text(bundle.summary_path, self._summary_markdown(request, bundle))
-        self._write_text(bundle.findings_path, self._findings_markdown())
+        self._write_text(bundle.findings_path, self._findings_markdown(request))
         self._write_text(bundle.manual_review_path, self._manual_review_markdown())
         self._write_text(
             bundle.codex_instructions_path,
@@ -123,15 +125,39 @@ class ScanBundleWriter:
             ]
         )
 
-    def _findings_markdown(self) -> str:
-        return "\n".join(
-            [
-                "# Findings",
-                "",
-                "No automated security gates have run yet.",
-                "",
-            ]
-        )
+    def _findings_markdown(self, request: ScanBundleRequest) -> str:
+        lines = [
+            "# Findings",
+            "",
+        ]
+
+        if not request.findings:
+            lines.extend(
+                [
+                    "No automated security findings detected.",
+                    "",
+                ]
+            )
+            return "\n".join(lines)
+
+        for index, finding in enumerate(request.findings, start=1):
+            location = finding.file
+            if finding.line is not None:
+                location = f"{location}:{finding.line}"
+
+            lines.extend(
+                [
+                    f"## {index}. {finding.gate}",
+                    "",
+                    f"- Severity: {finding.severity.value}",
+                    f"- Location: {location}",
+                    f"- Evidence: {finding.evidence}",
+                    f"- Recommendation: {finding.recommendation}",
+                    "",
+                ]
+            )
+
+        return "\n".join(lines)
 
     def _manual_review_markdown(self) -> str:
         return "\n".join(
@@ -187,7 +213,10 @@ class ScanBundleWriter:
                 "staged_bytes": len(request.diff.staged.encode()),
                 "untracked_bytes": len(request.diff.untracked.encode()),
             },
-            "findings": [],
+            "findings": [
+                finding.to_dict()
+                for finding in request.findings
+            ],
             "manual_review": [],
         }
 
