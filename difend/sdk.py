@@ -5,9 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
-from difend.bundle import ScanBundleWriter, ScanBundleRequest
-from difend.diff import CodeDiff, GitDiffCapture
+from difend.bundle import ScanBundleRequest, ScanBundleWriter
+from difend.diff import CodeDiff, DEFAULT_CONTEXT_LINES, GitDiffCapture
+from difend.gates import run_automated_gates
+from difend.parser import parse_code_diff
 
 
 class ScanStatus(str, Enum):
@@ -20,52 +23,35 @@ class ScanStatus(str, Enum):
 
 @dataclass(frozen=True)
 class ScanRequest:
-    """Input contract for a Difend scan.
-
-    repository_path:
-        Git repository to scan.
-    output_root:
-        Directory where future scan bundles will be written.
-    include_staged:
-        Capture staged changes from the Git index.
-    include_unstaged:
-        Capture unstaged working tree changes.
-    """
+    """Input contract for a Difend scan."""
 
     repository_path: Path
     output_root: Path = Path(".difend/runs")
     include_staged: bool = True
     include_unstaged: bool = True
+    context_lines: int = DEFAULT_CONTEXT_LINES
 
     @classmethod
     def from_path(
         cls,
         repository_path: str | Path = ".",
         output_root: str | Path = ".difend/runs",
+        include_staged: bool = True,
+        include_unstaged: bool = True,
+        context_lines: int = DEFAULT_CONTEXT_LINES,
     ) -> "ScanRequest":
         return cls(
             repository_path=Path(repository_path),
             output_root=Path(output_root),
+            include_staged=include_staged,
+            include_unstaged=include_unstaged,
+            context_lines=context_lines,
         )
 
 
 @dataclass(frozen=True)
 class ScanReport:
-    """Output contract returned by a Difend scan.
-
-    name:
-        Human-readable workflow name.
-    scan_id:
-        Stable identifier for this run.
-    repository_path:
-        Git repository that was scanned.
-    output_folder:
-        Future bundle location for this run.
-    status:
-        Final scan status.
-    diff:
-        Exact staged and unstaged diff content captured for the scan.
-    """
+    """Output contract returned by a Difend scan."""
 
     name: str
     scan_id: str
@@ -73,6 +59,8 @@ class ScanReport:
     output_folder: Path
     status: ScanStatus
     diff: CodeDiff
+    parsed_diff: dict[str, Any]
+    gates: dict[str, Any]
 
 
 class DifendSDK:
@@ -82,14 +70,19 @@ class DifendSDK:
         diff = GitDiffCapture(request.repository_path).capture(
             include_staged=request.include_staged,
             include_unstaged=request.include_unstaged,
+            context_lines=request.context_lines,
         )
-        status = ScanStatus.PASS
+        parsed_diff = parse_code_diff(diff)
+        gates = run_automated_gates(parsed_diff)
+        status = ScanStatus(gates["summary"]["status"])
         bundle = ScanBundleWriter().write(
             ScanBundleRequest(
                 repository_path=request.repository_path,
                 output_root=request.output_root,
                 status=status.value,
                 diff=diff,
+                parsed_diff=parsed_diff,
+                gates=gates,
             )
         )
 
@@ -100,17 +93,25 @@ class DifendSDK:
             output_folder=bundle.output_folder,
             status=status,
             diff=diff,
+            parsed_diff=parsed_diff,
+            gates=gates,
         )
 
 
 def scan(
     repository_path: str | Path = ".",
     output_root: str | Path = ".difend/runs",
+    include_staged: bool = True,
+    include_unstaged: bool = True,
+    context_lines: int = DEFAULT_CONTEXT_LINES,
 ) -> ScanReport:
     """Run a Difend scan through the default SDK instance."""
 
     request = ScanRequest.from_path(
         repository_path=repository_path,
         output_root=output_root,
+        include_staged=include_staged,
+        include_unstaged=include_unstaged,
+        context_lines=context_lines,
     )
     return DifendSDK().scan(request)

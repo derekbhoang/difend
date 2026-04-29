@@ -1,5 +1,32 @@
 # Difend - Diff Defend
 
+## Current MVP
+
+The current implementation provides a small `difend scan` CLI and SDK flow:
+
+1. Capture staged and unstaged Git diffs.
+2. Save the raw scanned patch to `.difend/runs/<run-id>/diff.patch`.
+3. Parse the diff into structured `staged` and `unstaged` sections in `report.json`.
+4. Group changed lines into `added`, `removed`, and `context` blocks with line ranges such as `23-25`.
+5. Write the first scan bundle files: `summary.md`, `findings.md`, `manual-review.md`, `codex-instructions.md`, `diff.patch`, and `report.json`.
+
+Run from the repository root:
+
+```bash
+python -m difend scan
+```
+
+Useful options:
+
+```bash
+python -m difend scan --context 5
+python -m difend scan --staged-only
+python -m difend scan --unstaged-only
+python -m difend scan --repo /path/to/repo
+```
+
+The automated security gates are not implemented yet, so the scan status currently defaults to `pass` and the findings/manual-review files are placeholders.
+
 ## Idea
 
 ### Pain Point
