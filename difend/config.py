@@ -13,11 +13,6 @@ def load_environment(repository_path: str | Path = ".") -> None:
     except ImportError:
         return
 
-    repo_path = Path(repository_path)
-    candidates = [
-        repo_path / ".env",
-        Path.cwd() / ".env",
-    ]
-    for path in candidates:
-        if path.exists():
-            load_dotenv(path, override=False)
+    path = Path(repository_path) / ".env"
+    if path.exists():
+        load_dotenv(path, override=False)

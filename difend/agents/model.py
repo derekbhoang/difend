@@ -62,7 +62,7 @@ class StructuredModelClient:
                 last_error = exc
                 if attempt >= self.retries:
                     break
-                time.sleep(0.5 * (2 ** attempt))
+                time.sleep(0.5 * (2**attempt))
         raise AgentNodeError(f"{node_name} failed after retries: {last_error}") from last_error
 
     def _model(self) -> Any:

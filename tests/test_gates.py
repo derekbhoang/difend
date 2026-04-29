@@ -37,6 +37,46 @@ def test_gate_rules_create_candidates():
     assert candidates[0].vulnerability_type == "hardcoded_secret"
 
 
+def test_gate_rules_detect_secret_keyword_inside_long_variable_name():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/model.py b/model.py\n"
+                "--- a/model.py\n"
+                "+++ b/model.py\n"
+                "@@ -1,0 +1,1 @@\n"
+                "+OPENAI_API_KEY_ENV_VAR = 'placeholder-secret-value'\n"
+            ),
+            staged="",
+        )
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert candidates
+    assert candidates[0].rule_id == "secret_scan"
+
+
+def test_gate_rules_detect_openai_secret_like_value():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/model.py b/model.py\n"
+                "--- a/model.py\n"
+                "+++ b/model.py\n"
+                "@@ -1,0 +1,1 @@\n"
+                "+CONFIG_VALUE = 'sk-proj-placeholderplaceholderplaceholder'\n"
+            ),
+            staged="",
+        )
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert candidates
+    assert candidates[0].rule_id == "secret_value_scan"
+
+
 def test_gate_llm_unknown_candidate_is_rejected():
     context = prepare_scan_context(_secret_diff())
 

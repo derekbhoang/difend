@@ -22,7 +22,10 @@ from difend.agents.utils import evidence_fingerprint, stable_short_hash
 GATES_VERSION = "2026-04-29.1"
 
 SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|secret|token|password|private[_-]?key)\s*[:=]\s*['\"][^'\"]{8,}['\"]"
+    r"(?i)\b[\w-]*(api[_-]?key|secret|token|password|private[_-]?key)[\w-]*\b\s*[:=]\s*['\"][^'\"]{8,}['\"]"
+)
+SECRET_VALUE_RE = re.compile(
+    r"(?i)['\"](?:sk-proj-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})['\"]"
 )
 SHELL_RE = re.compile(r"\b(os\.system|subprocess\.(?:run|call|Popen)|exec\(|eval\()")
 SQL_RE = re.compile(
@@ -87,6 +90,7 @@ def find_gate_candidates(scan_context: ScanContext) -> list[GateCandidate]:
     for added in scan_context.added_lines:
         checks = [
             ("hardcoded_secret", "secret_scan", SECRET_RE, Severity.HIGH, "Move secret to an environment variable or secret manager."),
+            ("hardcoded_secret", "secret_value_scan", SECRET_VALUE_RE, Severity.HIGH, "Remove the secret-like literal from source and load it from a secret store or environment variable."),
             ("dangerous_shell_execution", "shell_execution", SHELL_RE, Severity.HIGH, "Avoid shell execution or pass explicit argv with strict validation."),
             ("sql_injection", "sql_injection", SQL_RE, Severity.HIGH, "Use parameterized queries instead of string-built SQL."),
             ("weak_crypto", "weak_crypto", WEAK_CRYPTO_RE, Severity.MEDIUM, "Use a modern approved cryptographic primitive."),
