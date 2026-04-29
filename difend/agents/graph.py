@@ -221,7 +221,7 @@ def _security_reasoning(state: AgentGraphState) -> AgentGraphState:
 def _orchestrator_merge(state: AgentGraphState) -> AgentGraphState:
     metadata = state.get("metadata", {})
     feedback_records = metadata.get("feedback_records", [])
-    merged_findings, merged_review = merge_results(
+    merged_findings, merged_review, covered_review = merge_results(
         state["gates"].findings,
         state.get("manual_review", []),
     )
@@ -238,6 +238,7 @@ def _orchestrator_merge(state: AgentGraphState) -> AgentGraphState:
     return {
         "gates": state["gates"].model_copy(update={"findings": active_findings}),
         "manual_review": active_review,
+        "covered_manual_review": covered_review,
         "suppressed_findings": suppressed_findings,
         "suppressed_manual_review": suppressed_review,
         "risk_score": score,
@@ -291,6 +292,7 @@ def _result_from_state(state: AgentGraphState) -> AgenticScanResult:
         expanded_context=state.get("expanded_context", ExpandedContext()),
         gates=state["gates"],
         manual_review=state.get("manual_review", []),
+        covered_manual_review=state.get("covered_manual_review", []),
         suppressed_findings=state.get("suppressed_findings", []),
         suppressed_manual_review=state.get("suppressed_manual_review", []),
         handoff=state.get("handoff", HandoffResult()),

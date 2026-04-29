@@ -182,6 +182,7 @@ class AgenticScanResult(BaseModel):
     expanded_context: ExpandedContext
     gates: AutomatedGatesResult
     manual_review: list[ManualReviewItem] = Field(default_factory=list)
+    covered_manual_review: list[ManualReviewItem] = Field(default_factory=list)
     suppressed_findings: list[Finding] = Field(default_factory=list)
     suppressed_manual_review: list[ManualReviewItem] = Field(default_factory=list)
     handoff: HandoffResult
@@ -200,6 +201,7 @@ class AgentGraphState(TypedDict):
     expanded_context: NotRequired[ExpandedContext]
     gates: NotRequired[AutomatedGatesResult]
     manual_review: NotRequired[list[ManualReviewItem]]
+    covered_manual_review: NotRequired[list[ManualReviewItem]]
     suppressed_findings: NotRequired[list[Finding]]
     suppressed_manual_review: NotRequired[list[ManualReviewItem]]
     handoff: NotRequired[HandoffResult]

@@ -28,10 +28,11 @@ def test_gates_finding_wins_over_reasoning_overlap():
         evidence_fingerprint="same",
     )
 
-    findings, manual_review = merge_results([finding], [manual])
+    findings, manual_review, covered_review = merge_results([finding], [manual])
 
     assert findings == [finding]
     assert manual_review == []
+    assert covered_review == [manual]
     assert findings[0].severity == Severity.HIGH
 
 

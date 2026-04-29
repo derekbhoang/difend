@@ -16,16 +16,21 @@ SEVERITY_SCORE = {
 def merge_results(
     findings: list[Finding],
     manual_review: list[ManualReviewItem],
-) -> tuple[list[Finding], list[ManualReviewItem]]:
+) -> tuple[list[Finding], list[ManualReviewItem], list[ManualReviewItem]]:
     unique_findings = _dedupe_findings(findings)
     gate_keys = {_dedupe_key(finding) for finding in unique_findings}
-    filtered_review = [
-        item for item in _dedupe_manual_review(manual_review)
-        if _dedupe_key(item) not in gate_keys
-    ]
+    filtered_review: list[ManualReviewItem] = []
+    covered_review: list[ManualReviewItem] = []
+    for item in _dedupe_manual_review(manual_review):
+        if _dedupe_key(item) in gate_keys:
+            covered_review.append(item)
+        else:
+            filtered_review.append(item)
+
     return (
         sorted(unique_findings, key=lambda item: _sort_score(item), reverse=True),
         sorted(filtered_review, key=lambda item: _sort_score(item), reverse=True),
+        sorted(covered_review, key=lambda item: _sort_score(item), reverse=True),
     )
 
 

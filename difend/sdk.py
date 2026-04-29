@@ -70,6 +70,7 @@ class ScanReport:
     expanded_context: ExpandedContext = field(default_factory=ExpandedContext)
     findings: list[Finding] = field(default_factory=list)
     manual_review: list[ManualReviewItem] = field(default_factory=list)
+    covered_manual_review: list[ManualReviewItem] = field(default_factory=list)
     suppressed_findings: list[Finding] = field(default_factory=list)
     suppressed_manual_review: list[ManualReviewItem] = field(default_factory=list)
     risk_score: int = 0
@@ -107,6 +108,7 @@ class DifendSDK:
                 expanded_context=agentic_result.expanded_context,
                 findings=agentic_result.gates.findings,
                 manual_review=agentic_result.manual_review,
+                covered_manual_review=agentic_result.covered_manual_review,
                 suppressed_findings=agentic_result.suppressed_findings,
                 suppressed_manual_review=agentic_result.suppressed_manual_review,
                 risk_score=agentic_result.risk_score,
@@ -128,6 +130,7 @@ class DifendSDK:
             expanded_context=agentic_result.expanded_context,
             findings=agentic_result.gates.findings,
             manual_review=agentic_result.manual_review,
+            covered_manual_review=agentic_result.covered_manual_review,
             suppressed_findings=agentic_result.suppressed_findings,
             suppressed_manual_review=agentic_result.suppressed_manual_review,
             risk_score=agentic_result.risk_score,

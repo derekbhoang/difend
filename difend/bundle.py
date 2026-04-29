@@ -74,6 +74,7 @@ class ScanBundleRequest:
     expanded_context: ExpandedContext = field(default_factory=ExpandedContext)
     findings: list[Finding] = field(default_factory=list)
     manual_review: list[ManualReviewItem] = field(default_factory=list)
+    covered_manual_review: list[ManualReviewItem] = field(default_factory=list)
     suppressed_findings: list[Finding] = field(default_factory=list)
     suppressed_manual_review: list[ManualReviewItem] = field(default_factory=list)
     risk_score: int = 0
@@ -188,6 +189,16 @@ class ScanBundleWriter:
     def _manual_review_markdown(self, request: ScanBundleRequest) -> str:
         if not request.manual_review:
             lines = ["# Manual Review", "", "No manual review items.", ""]
+            if request.covered_manual_review:
+                lines.extend(["## Covered By Automated Gates", ""])
+                lines.extend(
+                    [
+                        f"- {item.manual_review_id}: {item.vulnerability_type} "
+                        f"at {item.file}:{item.line or '?'}"
+                        for item in request.covered_manual_review
+                    ]
+                )
+                lines.append("")
             if request.suppressed_manual_review:
                 lines.extend(["## Suppressed Manual Review", ""])
                 lines.extend(
@@ -219,6 +230,14 @@ class ScanBundleWriter:
                     "",
                 ]
             )
+        if request.covered_manual_review:
+            lines.extend(["## Covered By Automated Gates", ""])
+            for item in request.covered_manual_review:
+                lines.append(
+                    f"- {item.manual_review_id}: {item.vulnerability_type} "
+                    f"at {item.file}:{item.line or '?'}"
+                )
+            lines.append("")
         if request.suppressed_manual_review:
             lines.extend(["## Suppressed Manual Review", ""])
             for item in request.suppressed_manual_review:
@@ -291,6 +310,9 @@ class ScanBundleWriter:
             "expanded_context": model_dump(request.expanded_context),
             "findings": [model_dump(finding) for finding in request.findings],
             "manual_review": [model_dump(item) for item in request.manual_review],
+            "covered_manual_review": [
+                model_dump(item) for item in request.covered_manual_review
+            ],
             "suppressed_findings": [
                 model_dump(finding) for finding in request.suppressed_findings
             ],
