@@ -128,6 +128,221 @@ Every scan should leave enough context for a future reviewer or AI coding assist
 
 Core principle: review the diff first, trace context only when needed, and escalate uncertain security risks to a human or AI-assisted follow-up review with clear evidence.
 
+## Testing the Automated Gates Flow
+
+This section shows the simplest end-to-end demo for the current automated gates implementation on the `testting-gates` branch.
+
+There are two different repositories involved in the demo:
+
+- **Difend source repository:** the repository containing this README and the `difend` Python package.
+- **Demo target repository:** a temporary Git repository that contains a small code change for Difend to scan.
+
+Do not run the demo commands from inside a `.git` directory. Run them from the root of the demo target repository.
+
+### 1. Check Out This Branch
+
+```bash
+git clone -b testting-gates https://github.com/derekbhoang/difend.git
+cd difend
+```
+
+If you already have the repository locally:
+
+```bash
+git fetch origin
+git switch testting-gates
+```
+
+### 2. Run the Unit Tests
+
+From the Difend source repository:
+
+```bash
+python3 -m unittest discover
+```
+
+Expected result:
+
+```text
+Ran 9 tests
+OK
+```
+
+### 3. Create a Clean Demo Repository
+
+Keep the Difend source path in an environment variable, then create a temporary Git repository to scan:
+
+```bash
+export DIFEND_SRC="$(pwd)"
+DEMO=$(mktemp -d /tmp/difend-demo.XXXXXX)
+
+cd "$DEMO"
+git init
+
+printf '# Difend demo\n' > README.md
+printf '.difend/\n' > .gitignore
+
+git add README.md .gitignore
+git -c user.name=Demo -c user.email=demo@example.com commit -m init
+```
+
+The `.gitignore` entry is important because Difend writes scan output to `.difend/`. Ignoring that folder prevents later scans from scanning previous scan reports.
+
+Confirm that you are in the demo repository root:
+
+```bash
+pwd
+git status --short
+```
+
+The path should look like `/tmp/difend-demo.xxxxxx`, not `/tmp/difend-demo.xxxxxx/.git`.
+
+### 4. Add a Risky Code Change
+
+Create a new file with an intentionally unsafe `eval` call:
+
+```bash
+cat > risky_app.py <<'PY'
+def run_user_code(user_input):
+    return eval(user_input)
+PY
+```
+
+Confirm Git sees the new file:
+
+```bash
+git status --short
+```
+
+Expected result:
+
+```text
+?? risky_app.py
+```
+
+### 5. Run Difend Scan
+
+Run Difend from the demo repository, using `PYTHONPATH` to point Python at the Difend source repository:
+
+```bash
+PYTHONPATH="$DIFEND_SRC" python3 -m difend scan
+```
+
+Expected terminal output includes:
+
+```text
+Difend scan started
+
+Checking git diff... done
+Checking secrets... done
+Checking dependency changes... done
+Checking injection risks... warning
+Checking auth and permission changes... done
+
+Status: manual review required
+Report written to: .difend/runs/<run-id>
+Next: ask Codex to read .difend/runs/<run-id>/codex-instructions.md
+```
+
+The status is `manual review required` because the injection gate found `eval(user_input)`.
+
+### 6. Read the Scan Bundle
+
+Find the latest scan folder:
+
+```bash
+RUN=$(ls -td .difend/runs/* | head -1)
+```
+
+Read the human summary:
+
+```bash
+cat "$RUN/summary.md"
+```
+
+Read the automated findings:
+
+```bash
+cat "$RUN/findings.md"
+```
+
+Expected finding:
+
+```text
+risky_app.py:2
+Gate: injection risks
+Severity: high
+Evidence: return eval(user_input)
+```
+
+Read the Codex handoff prompt:
+
+```bash
+cat "$RUN/codex-instructions.md"
+```
+
+That file is meant to be handed to Codex or another reviewer so they can continue the security review with the exact diff, findings, and suggested next steps.
+
+### 7. Fix the Risky Code
+
+Replace the unsafe `eval` call with a harmless return for this demo:
+
+```bash
+cat > risky_app.py <<'PY'
+def run_user_code(user_input):
+    return user_input
+PY
+```
+
+### 8. Scan Again
+
+```bash
+PYTHONPATH="$DIFEND_SRC" python3 -m difend scan
+```
+
+Expected result:
+
+```text
+Checking injection risks... done
+Status: pass
+```
+
+Open the latest findings report:
+
+```bash
+RUN=$(ls -td .difend/runs/* | head -1)
+cat "$RUN/findings.md"
+```
+
+Expected result:
+
+```text
+No automated gate findings were detected.
+```
+
+### 9. Clean Up the Demo Repository
+
+When you are finished:
+
+```bash
+cd /tmp
+rm -rf "$DEMO"
+```
+
+### Demo Flow Summary
+
+```text
+1. Create a clean demo Git repository.
+2. Add a risky file containing eval(user_input).
+3. Run difend scan.
+4. Difend captures the Git diff and scans only added lines.
+5. The injection gate reports a high-risk finding.
+6. Read summary.md, findings.md, and codex-instructions.md.
+7. Fix the risky code.
+8. Run difend scan again.
+9. The scan passes when no automated gate findings remain.
+```
+
 ## Roadmap
 
 ### 28/04/2026
