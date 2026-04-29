@@ -17,6 +17,7 @@ BUNDLE_FILE_NAMES = (
     "manual-review.md",
     "codex-instructions.md",
     "diff.patch",
+    "gates.json",
     "report.json",
 )
 
@@ -47,6 +48,10 @@ class ScanBundle:
     @property
     def diff_path(self) -> Path:
         return self.output_folder / "diff.patch"
+
+    @property
+    def gates_path(self) -> Path:
+        return self.output_folder / "gates.json"
 
     @property
     def report_path(self) -> Path:
@@ -85,6 +90,7 @@ class ScanBundleWriter:
             self._codex_instructions_markdown(request, bundle),
         )
         self._write_text(bundle.diff_path, request.diff.combined)
+        self._write_json(bundle.gates_path, request.gates)
         self._write_json(bundle.report_path, self._report_json(request, bundle))
 
         return bundle
@@ -109,7 +115,7 @@ class ScanBundleWriter:
         bundle: ScanBundle,
     ) -> str:
         summary = request.parsed_diff["summary"]
-        gate_lines = [f"- {check['name']}: {check['status']}" for check in request.gates["checks"]]
+        gate_lines = [f"- {output['name']}: {output['status']}" for output in request.gates["gate_outputs"]]
         return "\n".join(
             [
                 "# Difend Scan Summary",
@@ -136,6 +142,11 @@ class ScanBundleWriter:
                 "",
                 f"- Automated findings: {len(request.gates['findings'])}",
                 f"- Manual review items: {len(request.gates['manual_review'])}",
+                "",
+                "## Generated Files",
+                "",
+                f"- Automated gates output: `{bundle.gates_path}`",
+                f"- Structured report: `{bundle.report_path}`",
                 "",
                 "## Next Steps",
                 "",
@@ -233,6 +244,7 @@ class ScanBundleWriter:
                 f"- Status: {request.status}",
                 f"- Repository: {request.repository_path}",
                 f"- Raw diff: {bundle.diff_path}",
+                f"- Automated gates: {bundle.gates_path}",
                 f"- Structured report: {bundle.report_path}",
                 f"- Findings: {bundle.findings_path}",
                 f"- Manual review: {bundle.manual_review_path}",
@@ -244,8 +256,8 @@ class ScanBundleWriter:
                 "## Suggested Action",
                 "",
                 "Inspect `findings.md` first. If findings are present, fix those concrete security issues. "
-                "Then inspect `manual-review.md` for areas that need deeper judgement, using `diff.patch` "
-                "and the `parsed_diff` section in `report.json` as source context.",
+                "Then inspect `manual-review.md` for areas that need deeper judgement. Use `gates.json` "
+                "for each rule-based gate output and `report.json` for the full structured context.",
                 "",
             ]
         )
@@ -267,6 +279,15 @@ class ScanBundleWriter:
             "status": request.status,
             "repository_path": str(request.repository_path),
             "output_folder": str(bundle.output_folder),
+            "files": {
+                "summary": str(bundle.summary_path),
+                "findings": str(bundle.findings_path),
+                "manual_review": str(bundle.manual_review_path),
+                "codex_instructions": str(bundle.codex_instructions_path),
+                "diff": str(bundle.diff_path),
+                "gates": str(bundle.gates_path),
+                "report": str(bundle.report_path),
+            },
             "diff": {
                 "has_changes": request.diff.has_changes,
                 "context_lines": request.diff.context_lines,
@@ -275,8 +296,12 @@ class ScanBundleWriter:
             },
             "parsed_diff": request.parsed_diff,
             "gates": {
-                "checks": request.gates["checks"],
+                "schema_version": request.gates["schema_version"],
+                "agent": request.gates["agent"],
+                "agent_metadata": request.gates["agent_metadata"],
+                "status": request.gates["status"],
                 "summary": request.gates["summary"],
+                "output_file": str(bundle.gates_path),
             },
             "findings": request.gates["findings"],
             "manual_review": request.gates["manual_review"],

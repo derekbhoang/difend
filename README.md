@@ -8,7 +8,8 @@ The current implementation provides a small `difend scan` CLI and SDK flow:
 2. Save the raw scanned patch to `.difend/runs/<run-id>/diff.patch`.
 3. Parse the diff into structured `staged` and `unstaged` sections in `report.json`.
 4. Group changed lines into `added`, `removed`, and `context` blocks with line ranges such as `23-25`.
-5. Write the first scan bundle files: `summary.md`, `findings.md`, `manual-review.md`, `codex-instructions.md`, `diff.patch`, and `report.json`.
+5. Run rule-based automated gates and aggregate their shared-schema outputs through `AutomatedGatesAgent`.
+6. Write the scan bundle files: `summary.md`, `findings.md`, `manual-review.md`, `codex-instructions.md`, `diff.patch`, `gates.json`, and `report.json`.
 
 Run from the repository root:
 
@@ -25,8 +26,14 @@ python -m difend scan --unstaged-only
 python -m difend scan --repo /path/to/repo
 ```
 
-The automated security gates are not implemented yet, so the scan status currently defaults to `pass` and the findings/manual-review files are placeholders.
+The current automated gates are basic rule-based checks. They do not call an API or agent directly; each gate returns the same output schema, and `AutomatedGatesAgent` aggregates those outputs into `gates.json`:
 
+- secrets scanning
+- dependency change detection
+- simple injection pattern checks
+- risky authentication or authorisation change detection
+
+The scan status comes from gate results: automated findings produce `fail`, manual-review items produce `manual review required`, and clean scans produce `pass`. Vulnerability database checks and deeper related-file tracing are not implemented yet.
 ## Idea
 
 ### Pain Point
@@ -118,6 +125,7 @@ Example:
       manual-review.md
       codex-instructions.md
       diff.patch
+      gates.json
       report.json
 ```
 
@@ -130,6 +138,7 @@ The final scan bundle should include:
 - Manual review checklist
 - Codex follow-up instructions
 - The exact diff that was scanned
+- Rule-based gate outputs in `gates.json`
 - Final status: pass, fail, or manual review required
 
 Suggested file responsibilities:
@@ -139,6 +148,7 @@ Suggested file responsibilities:
 - `manual-review.md`: suspicious areas that require human or AI-assisted security judgment.
 - `codex-instructions.md`: a focused prompt-style handoff file that tells Codex what was scanned, what needs deeper review, which files to inspect, and how to continue the developer's task safely.
 - `diff.patch`: the exact Git diff that Difend scanned.
+- `gates.json`: shared-schema outputs from each rule-based gate, aggregated by `AutomatedGatesAgent`.
 - `report.json`: structured machine-readable report for future integrations, CI, IDE plugins, and AI coding tools.
 
 ### Context Handoff Contract
@@ -174,6 +184,7 @@ Core principle: review the diff first, trace context only when needed, and escal
   - `manual-review.md`
   - `codex-instructions.md`
   - `diff.patch`
+  - `gates.json`
   - `report.json`
 - Build the automated gates runner.
 - Add initial automated gates:
