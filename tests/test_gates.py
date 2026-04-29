@@ -1,5 +1,5 @@
 from difend.agents.gates import find_gate_candidates, run_automated_gates
-from difend.agents.schemas import GateValidation, GateValidationResult
+from difend.agents.schemas import LLMGateValidation, LLMGateValidationResult, Severity
 from difend.agents.context import prepare_scan_context
 from difend.diff import CodeDiff
 
@@ -8,11 +8,35 @@ class HallucinatingGateModel:
     model = "fake"
 
     def invoke_structured(self, system_prompt, payload, schema, node_name):
-        return GateValidationResult(
+        return LLMGateValidationResult(
             validations=[
-                GateValidation(candidate_id="invented", confirmed=True),
+                LLMGateValidation(candidate_id="invented"),
             ]
         )
+
+
+class EnrichingGateModel:
+    model = "fake"
+
+    def invoke_structured(self, system_prompt, payload, schema, node_name):
+        return LLMGateValidationResult(
+            validations=[
+                LLMGateValidation(
+                    candidate_id=payload["candidates"][0]["candidate_id"],
+                    severity=Severity.CRITICAL,
+                    confidence=0.99,
+                    evidence="enriched evidence",
+                    recommendation="enriched recommendation",
+                )
+            ]
+        )
+
+
+class EmptyGateModel:
+    model = "fake"
+
+    def invoke_structured(self, system_prompt, payload, schema, node_name):
+        return LLMGateValidationResult(validations=[])
 
 
 def _secret_diff():
@@ -85,3 +109,72 @@ def test_gate_llm_unknown_candidate_is_rejected():
     assert result.rejected_llm_outputs == ["invented"]
     assert result.findings
     assert execution.used_llm
+
+
+def test_gate_llm_enriches_but_cannot_drop_candidates():
+    context = prepare_scan_context(_secret_diff())
+
+    empty_result, _ = run_automated_gates(context, EmptyGateModel())
+    enriched_result, _ = run_automated_gates(context, EnrichingGateModel())
+
+    assert len(empty_result.findings) == len(empty_result.candidates)
+    assert enriched_result.findings[0].severity == Severity.CRITICAL
+    assert enriched_result.findings[0].evidence == "enriched evidence"
+
+
+def test_marked_test_placeholder_secret_is_not_flagged():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/tests/test_model.py b/tests/test_model.py\n"
+                "--- a/tests/test_model.py\n"
+                "+++ b/tests/test_model.py\n"
+                "@@ -1,0 +1,1 @@\n"
+                "+FAKE_OPENAI_API_KEY = 'sk-proj-placeholderplaceholderplaceholder'\n"
+            ),
+            staged="",
+        )
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert candidates == []
+
+
+def test_real_secret_like_value_in_production_code_is_flagged():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/src/config.py b/src/config.py\n"
+                "--- a/src/config.py\n"
+                "+++ b/src/config.py\n"
+                "@@ -1,0 +1,1 @@\n"
+                "+CONFIG_VALUE = 'sk-proj-livevaluewithmanycharacters'\n"
+            ),
+            staged="",
+        )
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [candidate.rule_id for candidate in candidates] == ["secret_value_scan"]
+
+
+def test_scanner_regex_definitions_are_not_flagged_as_crypto_or_auth_bypass():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/difend/agents/gates.py b/difend/agents/gates.py\n"
+                "--- a/difend/agents/gates.py\n"
+                "+++ b/difend/agents/gates.py\n"
+                "@@ -1,0 +1,2 @@\n"
+                "+WEAK_CRYPTO_RE = re.compile(r'(?i)\\\\b(md5|sha1|des|rc4)\\\\b')\n"
+                "+DISABLED_AUTH_RE = re.compile(r'auth.*(false|skip|bypass)')\n"
+            ),
+            staged="",
+        )
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert candidates == []

@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from difend.agents import run_agentic_scan
 from difend.agents.model import DEFAULT_MODEL
@@ -78,6 +79,11 @@ class ScanReport:
     agents: list[AgentExecution] = field(default_factory=list)
     model: str = DEFAULT_MODEL
     cache_hit: bool = False
+    cache_key: str = ""
+    context_hash: str = ""
+    feedback_digest: str = ""
+    trace_path: Path | None = None
+    trace: dict[str, Any] = field(default_factory=dict)
 
 
 class DifendSDK:
@@ -116,6 +122,10 @@ class DifendSDK:
                 agents=agentic_result.agents,
                 model=agentic_result.model,
                 cache_hit=agentic_result.cache_hit,
+                cache_key=agentic_result.cache_key,
+                context_hash=agentic_result.context_hash,
+                feedback_digest=agentic_result.feedback_digest,
+                trace=agentic_result.trace,
             )
         )
 
@@ -138,6 +148,11 @@ class DifendSDK:
             agents=agentic_result.agents,
             model=agentic_result.model,
             cache_hit=agentic_result.cache_hit,
+            cache_key=agentic_result.cache_key,
+            context_hash=agentic_result.context_hash,
+            feedback_digest=agentic_result.feedback_digest,
+            trace_path=bundle.agent_trace_path,
+            trace=agentic_result.trace,
         )
 
 

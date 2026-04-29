@@ -12,14 +12,14 @@ from difend.agents.schemas import (
     AutomatedGatesResult,
     Finding,
     GateCandidate,
-    GateValidationResult,
+    LLMGateValidationResult,
     ScanContext,
     Severity,
 )
 from difend.agents.utils import evidence_fingerprint, stable_short_hash
 
 
-GATES_VERSION = "2026-04-29.1"
+GATES_VERSION = "2026-04-29.2"
 
 SECRET_RE = re.compile(
     r"(?i)\b[\w-]*(api[_-]?key|secret|token|password|private[_-]?key)[\w-]*\b\s*[:=]\s*['\"][^'\"]{8,}['\"]"
@@ -69,7 +69,7 @@ def run_automated_gates(
                 "candidates": [candidate.model_dump(mode="json") for candidate in candidates],
                 "patch": scan_context.patch,
             },
-            GateValidationResult,
+            LLMGateValidationResult,
             node_name="automated_gates_validation",
         )
         result = _apply_validation(candidates, validation)
@@ -98,6 +98,8 @@ def find_gate_candidates(scan_context: ScanContext) -> list[GateCandidate]:
             ("disabled_auth_check", "disabled_auth", DISABLED_AUTH_RE, Severity.HIGH, "Keep authentication and authorization checks enforced."),
         ]
         for vulnerability_type, rule_id, pattern, severity, recommendation in checks:
+            if _is_noise_controlled(vulnerability_type, added.file, added.content):
+                continue
             if pattern.search(added.content):
                 candidates.append(
                     _candidate(
@@ -156,10 +158,10 @@ def _candidate(
 
 def _apply_validation(
     candidates: list[GateCandidate],
-    validation: GateValidationResult,
+    validation: LLMGateValidationResult,
 ) -> AutomatedGatesResult:
     by_id = {candidate.candidate_id: candidate for candidate in candidates}
-    findings: list[Finding] = []
+    validation_by_id = {}
     rejected: list[str] = []
 
     for item in validation.validations:
@@ -167,27 +169,26 @@ def _apply_validation(
         if candidate is None:
             rejected.append(item.candidate_id)
             continue
-        if not item.confirmed:
-            continue
+        validation_by_id[candidate.candidate_id] = item
+
+    findings = []
+    for candidate in candidates:
+        item = validation_by_id.get(candidate.candidate_id)
         findings.append(
             _candidate_to_finding(
                 candidate,
-                severity=item.severity,
-                confidence=item.confidence,
-                evidence=item.evidence,
-                recommendation=item.recommendation,
+                severity=item.severity if item else None,
+                confidence=item.confidence if item else None,
+                evidence=item.evidence if item else None,
+                recommendation=item.recommendation if item else None,
             )
         )
-
-    validated_ids = {item.candidate_id for item in validation.validations}
-    for candidate in candidates:
-        if candidate.candidate_id not in validated_ids:
-            findings.append(_candidate_to_finding(candidate))
 
     return AutomatedGatesResult(
         candidates=candidates,
         findings=findings,
         rejected_llm_outputs=rejected,
+        llm_validation=validation,
     )
 
 
@@ -216,3 +217,65 @@ def _candidate_to_finding(
         recommendation=recommendation or candidate.recommendation,
         evidence_fingerprint=fingerprint,
     )
+
+
+def _is_noise_controlled(vulnerability_type: str, file: str, content: str) -> bool:
+    if vulnerability_type == "hardcoded_secret" and _is_marked_test_placeholder(
+        file,
+        content,
+    ):
+        return True
+    if vulnerability_type in {
+        "weak_crypto",
+        "disabled_auth_check",
+    } and _is_scanner_rule_definition(file, content):
+        return True
+    return False
+
+
+def _is_marked_test_placeholder(file: str, content: str) -> bool:
+    normalized = file.replace("\\", "/").lower()
+    parts = set(normalized.split("/"))
+    is_test_file = (
+        "test" in parts
+        or "tests" in parts
+        or normalized.startswith("test_")
+        or "/test_" in normalized
+        or normalized.endswith("_test.py")
+        or ".spec." in normalized
+        or ".test." in normalized
+    )
+    if not is_test_file:
+        return False
+
+    lower = content.lower()
+    markers = {
+        "fake",
+        "placeholder",
+        "dummy",
+        "example",
+        "mock",
+        "not-a-real-secret",
+        "not real",
+        "test data",
+        "fixture",
+    }
+    return any(marker in lower for marker in markers)
+
+
+def _is_scanner_rule_definition(file: str, content: str) -> bool:
+    normalized = file.replace("\\", "/").lower()
+    if not normalized.startswith("difend/agents/"):
+        return False
+
+    lower = content.lower()
+    rule_markers = {
+        "re.compile",
+        "_re =",
+        "riskarea.",
+        "risk_keywords",
+        "weak_crypto_re",
+        "disabled_auth_re",
+        "secret_re",
+    }
+    return any(marker in lower for marker in rule_markers)

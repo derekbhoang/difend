@@ -2,11 +2,11 @@ from pathlib import Path
 
 from difend.agents.graph import run_agentic_scan
 from difend.agents.schemas import (
-    DiffClassifierResult,
-    GateValidationResult,
-    HandoffResult,
+    LLMDiffClassifierResult,
+    LLMGateValidationResult,
+    LLMHandoffResult,
+    LLMSecurityReasoningResult,
     RiskArea,
-    SecurityReasoningResult,
 )
 from difend.diff import CodeDiff
 
@@ -15,19 +15,18 @@ class FakeModel:
     model = "fake-model"
 
     def invoke_structured(self, system_prompt, payload, schema, node_name):
-        if schema is DiffClassifierResult:
-            return DiffClassifierResult(
+        if schema is LLMDiffClassifierResult:
+            return LLMDiffClassifierResult(
                 risk_areas=[RiskArea.LOW_RISK],
                 reason="Fake low risk.",
                 should_run_security_reasoning=False,
-                used_llm=True,
             )
-        if schema is GateValidationResult:
-            return GateValidationResult(validations=[])
-        if schema is SecurityReasoningResult:
-            return SecurityReasoningResult(manual_review=[])
-        if schema is HandoffResult:
-            return HandoffResult(
+        if schema is LLMGateValidationResult:
+            return LLMGateValidationResult(validations=[])
+        if schema is LLMSecurityReasoningResult:
+            return LLMSecurityReasoningResult(manual_review=[])
+        if schema is LLMHandoffResult:
+            return LLMHandoffResult(
                 inspect_next=[],
                 codex_tasks=["Review complete."],
                 checklist=["Inspect report."],
@@ -74,3 +73,31 @@ def test_low_risk_routing_skips_security_reasoning(tmp_path: Path):
         agent.name == "security_reasoning" and agent.status.value == "skipped"
         for agent in result.agents
     ) is False
+    assert result.trace["cache_lookup"]["hit"] is False
+
+
+def test_cache_hit_after_classifier_and_context_expansion(tmp_path: Path):
+    diff = CodeDiff(
+        unstaged=(
+            "diff --git a/README.md b/README.md\n"
+            "--- a/README.md\n"
+            "+++ b/README.md\n"
+            "@@ -1,0 +1,1 @@\n"
+            "+Docs only.\n"
+        ),
+        staged="",
+    )
+
+    first = run_agentic_scan(tmp_path, diff, model_client=None, use_cache=True)
+    second = run_agentic_scan(tmp_path, diff, model_client=None, use_cache=True)
+
+    assert first.cache_hit is False
+    assert second.cache_hit is True
+    assert second.trace["cache_lookup"]["hit"] is True
+    assert [agent.name for agent in second.agents][:5] == [
+        "prepare_scan_context",
+        "diff_classifier",
+        "orchestrator_route",
+        "context_expansion",
+        "cache_lookup",
+    ]

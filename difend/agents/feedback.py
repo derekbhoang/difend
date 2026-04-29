@@ -41,18 +41,26 @@ def apply_feedback(
     findings: list[Finding],
     records: list[FeedbackRecord],
 ) -> tuple[list[Finding], list[Finding]]:
-    false_positive_fingerprints = {
-        record.evidence_fingerprint
+    false_positive_records = {
+        record.evidence_fingerprint: record
         for record in records
-        if record.label == "false_positive"
+        if _valid_suppression_record(record, item_type="finding")
     }
     active: list[Finding] = []
     suppressed: list[Finding] = []
     for finding in findings:
-        if finding.evidence_fingerprint in false_positive_fingerprints:
-            finding.suppressed = True
-            finding.suppression_reason = "Suppressed by exact false-positive feedback."
-            suppressed.append(finding)
+        record = false_positive_records.get(finding.evidence_fingerprint)
+        if record and _can_suppress_severity(finding.severity, record):
+            suppressed_finding = finding.model_copy(
+                update={
+                    "suppressed": True,
+                    "suppression_reason": (
+                        "Suppressed by exact false-positive feedback: "
+                        f"{record.reason}"
+                    ),
+                }
+            )
+            suppressed.append(suppressed_finding)
         else:
             active.append(finding)
     return active, suppressed
@@ -62,16 +70,40 @@ def apply_manual_review_feedback(
     manual_review: list[ManualReviewItem],
     records: list[FeedbackRecord],
 ) -> tuple[list[ManualReviewItem], list[ManualReviewItem]]:
-    false_positive_fingerprints = {
-        record.evidence_fingerprint
+    false_positive_records = {
+        record.evidence_fingerprint: record
         for record in records
-        if record.label == "false_positive"
+        if _valid_suppression_record(record, item_type="manual_review")
     }
     active: list[ManualReviewItem] = []
     suppressed: list[ManualReviewItem] = []
     for item in manual_review:
-        if item.evidence_fingerprint in false_positive_fingerprints:
-            suppressed.append(item)
+        record = false_positive_records.get(item.evidence_fingerprint)
+        if record and _can_suppress_severity(item.risk_level, record):
+            suppressed.append(
+                item.model_copy(
+                    update={
+                        "suppressed": True,
+                        "suppression_reason": (
+                            "Suppressed by exact false-positive feedback: "
+                            f"{record.reason}"
+                        ),
+                    }
+                )
+            )
         else:
             active.append(item)
     return active, suppressed
+
+
+def _valid_suppression_record(record: FeedbackRecord, item_type: str) -> bool:
+    return (
+        record.label == "false_positive"
+        and record.item_type == item_type
+        and bool(record.reason.strip())
+        and bool(record.evidence_fingerprint)
+    )
+
+
+def _can_suppress_severity(severity, record: FeedbackRecord) -> bool:
+    return severity.value != "critical" or record.force

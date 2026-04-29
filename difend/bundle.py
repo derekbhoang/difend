@@ -27,6 +27,7 @@ BUNDLE_FILE_NAMES = (
     "codex-instructions.md",
     "diff.patch",
     "report.json",
+    "agent-trace.json",
 )
 
 
@@ -61,6 +62,10 @@ class ScanBundle:
     def report_path(self) -> Path:
         return self.output_folder / "report.json"
 
+    @property
+    def agent_trace_path(self) -> Path:
+        return self.output_folder / "agent-trace.json"
+
 
 @dataclass(frozen=True)
 class ScanBundleRequest:
@@ -82,6 +87,10 @@ class ScanBundleRequest:
     agents: list[AgentExecution] = field(default_factory=list)
     model: str = ""
     cache_hit: bool = False
+    cache_key: str = ""
+    context_hash: str = ""
+    feedback_digest: str = ""
+    trace: dict[str, Any] = field(default_factory=dict)
 
 
 class ScanBundleWriter:
@@ -105,6 +114,7 @@ class ScanBundleWriter:
         )
         self._write_text(bundle.diff_path, self._patch_text(request.diff))
         self._write_json(bundle.report_path, self._report_json(request, bundle))
+        self._write_json(bundle.agent_trace_path, self._agent_trace_json(request, bundle))
 
         return bundle
 
@@ -324,6 +334,28 @@ class ScanBundleWriter:
             "agents": [model_dump(agent) for agent in request.agents],
             "model": request.model,
             "cache_hit": request.cache_hit,
+            "cache_key": request.cache_key,
+            "context_hash": request.context_hash,
+            "feedback_digest": request.feedback_digest,
+            "trace_path": str(bundle.agent_trace_path),
+        }
+
+    def _agent_trace_json(
+        self,
+        request: ScanBundleRequest,
+        bundle: ScanBundle,
+    ) -> dict[str, Any]:
+        return {
+            "scan_id": bundle.scan_id,
+            "status": request.status,
+            "cache": {
+                "hit": request.cache_hit,
+                "cache_key": request.cache_key,
+                "context_hash": request.context_hash,
+                "feedback_digest": request.feedback_digest,
+            },
+            "agents": [model_dump(agent) for agent in request.agents],
+            "trace": request.trace,
         }
 
     def _write_text(self, path: Path, content: str) -> None:

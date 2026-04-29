@@ -42,7 +42,10 @@ class AgenticScanCache:
         self.root = repository_path / ".difend" / "cache"
 
     def get(self, key: CacheKey) -> AgenticScanResult | None:
-        path = self._path(key)
+        return self.get_by_digest(key.digest())
+
+    def get_by_digest(self, digest: str) -> AgenticScanResult | None:
+        path = self.root / f"{digest}.json"
         if not path.exists():
             return None
         try:
@@ -51,8 +54,11 @@ class AgenticScanCache:
             return None
 
     def set(self, key: CacheKey, result: AgenticScanResult) -> None:
+        self.set_by_digest(key.digest(), result)
+
+    def set_by_digest(self, digest: str, result: AgenticScanResult) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        self._path(key).write_text(
+        (self.root / f"{digest}.json").write_text(
             result.model_dump_json(indent=2) + "\n",
             encoding="utf-8",
         )

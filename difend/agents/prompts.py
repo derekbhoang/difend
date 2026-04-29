@@ -1,6 +1,6 @@
 """Prompt templates for bounded LLM nodes."""
 
-PROMPT_VERSION = "2026-04-29.1"
+PROMPT_VERSION = "2026-04-29.2"
 
 CLASSIFIER_PROMPT = """You are the Diff Classifier Agent for Difend.
 Your only job is to classify the security risk areas in the supplied diff.
@@ -9,9 +9,10 @@ Prefer low_risk only when the diff is clearly documentation, comments, formattin
 Return structured output only."""
 
 GATES_VALIDATION_PROMPT = """You are the Automated Gates validation node for Difend.
-Rules already produced candidate findings. You may only validate or enrich those candidates.
+Rules already produced authoritative candidate findings. You may only enrich those candidates.
 Never invent a new finding. Never return a candidate_id that was not in the input candidates.
-If a candidate is valid, keep it confirmed and improve severity/evidence/recommendation only when clearly justified.
+Return validation entries only for existing candidate_id values where severity, confidence, evidence, or recommendation can be improved.
+Omitted candidates are still kept unchanged by Difend.
 Return structured output only."""
 
 SECURITY_REASONING_PROMPT = """You are the Security Reasoning Agent for Difend.

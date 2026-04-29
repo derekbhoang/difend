@@ -6,10 +6,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-SCHEMA_VERSION = "2026-04-29.1"
+SCHEMA_VERSION = "2026-04-29.2"
 
 
 class RiskArea(str, Enum):
@@ -88,6 +88,15 @@ class DiffClassifierResult(BaseModel):
         return value or [RiskArea.LOW_RISK]
 
 
+class LLMDiffClassifierResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    risk_areas: list[RiskArea] = Field(default_factory=list)
+    sensitive_files: list[str] = Field(default_factory=list)
+    reason: str = ""
+    should_run_security_reasoning: bool = False
+
+
 class GateCandidate(BaseModel):
     candidate_id: str
     vulnerability_type: str
@@ -100,17 +109,20 @@ class GateCandidate(BaseModel):
     rule_id: str
 
 
-class GateValidation(BaseModel):
+class LLMGateValidation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     candidate_id: str
-    confirmed: bool = True
     severity: Severity | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     evidence: str | None = None
     recommendation: str | None = None
 
 
-class GateValidationResult(BaseModel):
-    validations: list[GateValidation] = Field(default_factory=list)
+class LLMGateValidationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    validations: list[LLMGateValidation] = Field(default_factory=list)
 
 
 class Finding(BaseModel):
@@ -132,6 +144,7 @@ class AutomatedGatesResult(BaseModel):
     candidates: list[GateCandidate] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     rejected_llm_outputs: list[str] = Field(default_factory=list)
+    llm_validation: LLMGateValidationResult | None = None
     used_llm_validation: bool = False
 
 
@@ -148,13 +161,40 @@ class ManualReviewItem(BaseModel):
     questions: list[str] = Field(default_factory=list)
     evidence_fingerprint: str
     source: str = "security_reasoning"
+    suppressed: bool = False
+    suppression_reason: str | None = None
 
 
-class SecurityReasoningResult(BaseModel):
-    manual_review: list[ManualReviewItem] = Field(default_factory=list)
+class LLMSecurityReasoningItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    area: RiskArea
+    vulnerability_type: str
+    risk_level: Severity
+    confidence: float = Field(ge=0.0, le=1.0)
+    file: str
+    line: int | None = None
+    reason: str
+    evidence: str
+    questions: list[str] = Field(default_factory=list)
+
+
+class LLMSecurityReasoningResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    manual_review: list[LLMSecurityReasoningItem] = Field(default_factory=list)
 
 
 class HandoffResult(BaseModel):
+    inspect_next: list[str] = Field(default_factory=list)
+    codex_tasks: list[str] = Field(default_factory=list)
+    checklist: list[str] = Field(default_factory=list)
+    safest_next_action: str = "No risky changes were detected."
+
+
+class LLMHandoffResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     inspect_next: list[str] = Field(default_factory=list)
     codex_tasks: list[str] = Field(default_factory=list)
     checklist: list[str] = Field(default_factory=list)
@@ -170,9 +210,16 @@ class AgentExecution(BaseModel):
 
 class FeedbackRecord(BaseModel):
     item_id: str
+    item_type: str = "finding"
     label: str
     evidence_fingerprint: str
-    reason: str = ""
+    reason: str
+    run_id: str = ""
+    created_at: str = ""
+    file: str = ""
+    line: int | None = None
+    severity: Severity | None = None
+    force: bool = False
 
 
 class AgenticScanResult(BaseModel):
@@ -190,6 +237,10 @@ class AgenticScanResult(BaseModel):
     agents: list[AgentExecution] = Field(default_factory=list)
     model: str
     cache_hit: bool = False
+    cache_key: str = ""
+    context_hash: str = ""
+    feedback_digest: str = ""
+    trace: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentGraphState(TypedDict):
@@ -209,5 +260,10 @@ class AgentGraphState(TypedDict):
     status: NotRequired[str]
     agents: NotRequired[list[AgentExecution]]
     cache_hit: NotRequired[bool]
+    cache_key: NotRequired[str]
+    context_hash: NotRequired[str]
+    feedback_digest: NotRequired[str]
+    cached_result: NotRequired[AgenticScanResult]
+    trace: NotRequired[dict[str, Any]]
     errors: NotRequired[list[str]]
     metadata: NotRequired[dict[str, Any]]

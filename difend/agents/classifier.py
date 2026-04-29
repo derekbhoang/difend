@@ -9,6 +9,7 @@ from difend.agents.schemas import (
     AgentExecution,
     AgentStatus,
     DiffClassifierResult,
+    LLMDiffClassifierResult,
     RiskArea,
     ScanContext,
 )
@@ -63,10 +64,10 @@ def classify_diff(
     result = model_client.invoke_structured(
         CLASSIFIER_PROMPT,
         payload,
-        DiffClassifierResult,
+        LLMDiffClassifierResult,
         node_name="diff_classifier",
     )
-    result.used_llm = True
+    result = _normalize_llm_classifier(result)
     if RiskArea.LOW_RISK not in result.risk_areas and result.risk_areas:
         result.should_run_security_reasoning = (
             result.should_run_security_reasoning
@@ -147,3 +148,13 @@ def _has_sensitive_area(areas: set[RiskArea] | list[RiskArea]) -> bool:
         RiskArea.BUSINESS_LOGIC,
     }
     return bool(set(areas) & sensitive)
+
+
+def _normalize_llm_classifier(result: LLMDiffClassifierResult) -> DiffClassifierResult:
+    return DiffClassifierResult(
+        risk_areas=result.risk_areas or [RiskArea.LOW_RISK],
+        sensitive_files=sorted(set(result.sensitive_files)),
+        reason=result.reason,
+        should_run_security_reasoning=result.should_run_security_reasoning,
+        used_llm=True,
+    )

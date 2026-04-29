@@ -10,6 +10,7 @@ from difend.agents.schemas import (
     DiffClassifierResult,
     Finding,
     HandoffResult,
+    LLMHandoffResult,
     ManualReviewItem,
     ScanContext,
 )
@@ -52,10 +53,10 @@ def run_handoff(
             "findings": [finding.model_dump(mode="json") for finding in findings],
             "manual_review": [item.model_dump(mode="json") for item in manual_review],
         },
-        HandoffResult,
+        LLMHandoffResult,
         node_name="handoff",
     )
-    return result, AgentExecution(
+    return _normalize_handoff(result), AgentExecution(
         name="handoff",
         status=AgentStatus.COMPLETED,
         used_llm=True,
@@ -91,4 +92,13 @@ def _deterministic_handoff(
             if status == "manual review required"
             else "Proceed with normal review."
         ),
+    )
+
+
+def _normalize_handoff(result: LLMHandoffResult) -> HandoffResult:
+    return HandoffResult(
+        inspect_next=result.inspect_next,
+        codex_tasks=result.codex_tasks,
+        checklist=result.checklist,
+        safest_next_action=result.safest_next_action,
     )
