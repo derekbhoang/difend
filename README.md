@@ -10,19 +10,38 @@ Automated security tools are useful for common issues like leaked secrets, vulne
 
 Teams need a lightweight workflow that checks only the code diff, catches common vulnerabilities automatically, and flags suspicious changes for human security review when deeper context is required. They also need a way to preserve that review context so a developer can continue the task with Codex or another AI coding assistant without re-explaining what changed, what was scanned, and what still needs attention.
 
-Difend is designed as a diff-aware security review SDK with a CLI entry point. The CLI gives developers quick terminal feedback, while the SDK produces a persistent scan bundle that can be read by developers, security reviewers, Codex, or another AI coding assistant.
+Difend is designed as a diff-aware AI security review SDK with a CLI entry point. The CLI gives developers quick terminal feedback, while the SDK coordinates focused review agents and produces a persistent scan bundle that can be read by developers, security reviewers, Codex, or another AI coding assistant.
 
-The scan bundle is not only a security report. It is structured context for follow-up work. After an AI coding tool generates a code change, `difend scan` turns the current Git diff into Markdown and JSON files that explain what changed, which security checks ran, what problems were found, what needs manual review, and which files Codex should inspect next.
+The scan bundle is not only a security report. It is structured context for follow-up work. After an AI coding tool generates a code change, `difend scan` turns the current Git diff into Markdown and JSON files that explain what changed, which agents reviewed it, what problems were found, what needs manual review, and which files Codex should inspect next.
 
 ### Product Shape
 
 Difend has three connected layers:
 
 - **CLI:** `difend scan` gives the developer immediate terminal feedback after a code change.
-- **SDK:** the reusable scan engine captures diffs, runs gates, creates findings, and writes scan bundles.
+- **SDK:** the reusable scan engine captures diffs, coordinates review agents, creates findings, and writes scan bundles.
 - **Context bundle:** the generated `.md`, `.patch`, and `.json` files give Codex or another AI coding tool focused security context for deeper review, explanation, or remediation.
 
 This means Difend supports two workflows at the same time: quick local security feedback for the developer, and better context awareness for AI coding tools that continue the task.
+
+## AI Agent System
+
+Difend is agent-based because the scan is split into focused review roles. Each agent receives the current diff, makes a bounded security judgement, and returns structured output that the SDK merges into the final report.
+
+The first version of Difend should use three agents:
+
+- **Automated Gates Agent:** checks the diff for concrete security problems such as hardcoded secrets, dangerous dependency changes, injection patterns, unsafe shell execution, weak cryptography, and sensitive data exposure.
+- **Security Review Agent:** looks for suspicious changes that may require deeper judgement, especially authentication, authorisation, privilege boundaries, sessions, personal data, database access, file access, payments, and cryptography.
+- **Handoff Agent:** turns the scan result into clear follow-up context for Codex or another AI coding assistant, including what was scanned, what was found, which files to inspect next, and the safest next action.
+
+The SDK acts as the coordinator. It captures the diff, runs the agents, combines their outputs, decides the final status, and writes the scan bundle.
+
+Agent outputs should be structured so they can be written to both Markdown and JSON:
+
+- `findings`: concrete security issues found by the Automated Gates Agent.
+- `manual_review`: uncertain or context-dependent risks found by the Security Review Agent.
+- `codex_instructions`: follow-up instructions produced by the Handoff Agent.
+- `status`: final result of `pass`, `fail`, or `manual review required`.
 
 ## Workflow
 
@@ -40,14 +59,15 @@ difend scan
 3. The command triggers the `difend SDK`.
 4. The `difend SDK` captures the current code diff from the Git working tree.
 5. Difend creates a scan output folder for the current run.
-6. The SDK sends the diff into two asynchronous security review directions:
+6. The SDK sends the diff into three focused agent review directions:
 
-- **Automated gates:** Detect common vulnerabilities in the diff, such as leaked secrets, vulnerable dependencies, injection risks, unsafe auth changes, weak cryptography, and sensitive data exposure. This should handle around 80% of routine security detection.
-- **Security risks:** Look for suspicious code that may contain deeper flaws. The SDK starts from the diff, traces related files only when needed, and asks for manual review when the code may affect authentication, authorisation, privilege boundaries, secrets, personal data, database queries, file access, payments, cryptography, or session management. This should handle around 20% of cases where human verification is required.
+- **Automated Gates Agent:** detects common vulnerabilities in the diff, such as leaked secrets, vulnerable dependencies, injection risks, unsafe auth changes, weak cryptography, and sensitive data exposure. This should handle around 80% of routine security detection.
+- **Security Review Agent:** looks for suspicious code that may contain deeper flaws. The agent starts from the diff, traces related files only when needed, and asks for manual review when the code may affect authentication, authorisation, privilege boundaries, secrets, personal data, database queries, file access, payments, cryptography, or session management. This should handle around 20% of cases where human verification is required.
+- **Handoff Agent:** prepares the Codex follow-up instructions so the developer can continue safely without re-explaining the scan context.
 
 7. Difend prints progress in the terminal while each check runs.
-8. Difend waits for both directions to finish.
-9. Difend combines the results into one final security report and context handoff.
+8. Difend waits for the agents to finish.
+9. Difend combines the agent results into one final security report and context handoff.
 10. Difend writes the final output into the scan folder as Markdown files, the exact scanned patch, and machine-readable JSON.
 11. The developer can continue in Codex by asking it to read the generated Markdown files for deeper review, explanation, or remediation.
 12. The final status is one of:
@@ -66,10 +86,9 @@ Example:
 Difend scan started
 
 Checking git diff... done
-Checking secrets... done
-Checking dependency changes... done
-Checking injection risks... warning
-Checking auth and permission changes... manual review required
+Running Automated Gates Agent... done
+Running Security Review Agent... manual review required
+Running Handoff Agent... done
 
 Status: manual review required
 Report written to: .difend/runs/2026-04-29-001/
@@ -96,12 +115,12 @@ Example:
 
 The final scan bundle should include:
 
-- Automated gate findings
-- Security risks that require human verification
+- Automated Gates Agent findings
+- Security Review Agent risks that require human verification
 - Files and lines involved
 - Recommended fixes
 - Manual review checklist
-- Codex follow-up instructions
+- Handoff Agent Codex follow-up instructions
 - The exact diff that was scanned
 - Final status: pass, fail, or manual review required
 
@@ -120,7 +139,7 @@ Every scan should leave enough context for a future reviewer or AI coding assist
 
 - What diff was scanned?
 - Which files and added lines were involved?
-- Which automated checks ran?
+- Which agents ran?
 - Which findings are concrete security problems?
 - Which areas are suspicious but need deeper judgement?
 - What should Codex inspect next?
@@ -148,22 +167,22 @@ Core principle: review the diff first, trace context only when needed, and escal
   - `codex-instructions.md`
   - `diff.patch`
   - `report.json`
-- Build the automated gates runner.
-- Add initial automated gates:
+- Build the first agent runner.
+- Add initial Automated Gates Agent checks:
   - secrets scanning
   - dependency change detection
   - simple injection pattern checks
   - risky authentication or authorisation change detection
 - Define a shared finding format with file, line, severity, evidence, gate name, and recommendation.
-- Combine automated gate results into one partial report.
+- Combine agent results into one partial report.
 - Print progress for each check in the terminal.
 - Make `codex-instructions.md` useful as a direct handoff prompt for Codex.
 - Test the command against small sample diffs.
 
-Goal for the day: `difend scan` can capture a diff, run basic automated gates, print terminal progress, and write a structured scan bundle to `.difend/runs/<run-id>/` that developers can hand to Codex for follow-up.
+Goal for the day: `difend scan` can capture a diff, run basic review agents, print terminal progress, and write a structured scan bundle to `.difend/runs/<run-id>/` that developers can hand to Codex for follow-up.
 
 ### 30/04/2026
-- Implement the security risk review direction.
+- Implement the Security Review Agent.
 - Detect when changed code may require human verification, especially changes involving:
   - authentication
   - authorisation
