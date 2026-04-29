@@ -176,6 +176,7 @@ class ScanBundleWriter:
                     f"## {finding.finding_id}",
                     "",
                     f"- Type: {finding.vulnerability_type}",
+                    f"- Gate: {finding.gate_name}",
                     f"- Severity: {finding.severity.value}",
                     f"- Confidence: {finding.confidence:.2f}",
                     f"- Location: {finding.file}:{finding.line or '?'}",

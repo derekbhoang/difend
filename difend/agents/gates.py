@@ -209,6 +209,7 @@ def _candidate_to_finding(
     return Finding(
         finding_id=f"finding-{fingerprint}",
         vulnerability_type=candidate.vulnerability_type,
+        gate_name=candidate.rule_id,
         severity=severity or candidate.severity,
         confidence=confidence if confidence is not None else candidate.confidence,
         file=candidate.file,

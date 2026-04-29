@@ -9,7 +9,7 @@ from typing import Any, NotRequired, TypedDict
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-SCHEMA_VERSION = "2026-04-29.2"
+SCHEMA_VERSION = "2026-04-29.3"
 
 
 class RiskArea(str, Enum):
@@ -128,6 +128,7 @@ class LLMGateValidationResult(BaseModel):
 class Finding(BaseModel):
     finding_id: str
     vulnerability_type: str
+    gate_name: str = "automated_gates"
     severity: Severity
     confidence: float = Field(ge=0.0, le=1.0)
     file: str

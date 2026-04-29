@@ -118,8 +118,10 @@ def test_gate_llm_enriches_but_cannot_drop_candidates():
     enriched_result, _ = run_automated_gates(context, EnrichingGateModel())
 
     assert len(empty_result.findings) == len(empty_result.candidates)
+    assert empty_result.findings[0].gate_name == "secret_scan"
     assert enriched_result.findings[0].severity == Severity.CRITICAL
     assert enriched_result.findings[0].evidence == "enriched evidence"
+    assert enriched_result.findings[0].gate_name == "secret_scan"
 
 
 def test_marked_test_placeholder_secret_is_not_flagged():
@@ -158,6 +160,27 @@ def test_real_secret_like_value_in_production_code_is_flagged():
     candidates = find_gate_candidates(context)
 
     assert [candidate.rule_id for candidate in candidates] == ["secret_value_scan"]
+
+
+def test_dependency_finding_includes_gate_name():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/requirements.txt b/requirements.txt\n"
+                "--- a/requirements.txt\n"
+                "+++ b/requirements.txt\n"
+                "@@ -1,0 +1,1 @@\n"
+                "+requests==2.32.0\n"
+            ),
+            staged="",
+        )
+    )
+
+    result, _ = run_automated_gates(context, None)
+
+    assert result.findings
+    assert result.findings[0].vulnerability_type == "dependency_risk"
+    assert result.findings[0].gate_name == "dependency_change"
 
 
 def test_scanner_regex_definitions_are_not_flagged_as_crypto_or_auth_bypass():
