@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from difend.bundle import ScanBundleWriter, ScanBundleRequest
+from difend.agents import run_agentic_scan
+from difend.agents.model import DEFAULT_MODEL
+from difend.agents.schemas import (
+    AgentExecution,
+    ExpandedContext,
+    Finding,
+    HandoffResult,
+    ManualReviewItem,
+    RiskArea,
+)
+from difend.bundle import ScanBundleRequest, ScanBundleWriter
+from difend.config import load_environment
 from difend.diff import CodeDiff, GitDiffCapture
 
 
@@ -20,55 +32,33 @@ class ScanStatus(str, Enum):
 
 @dataclass(frozen=True)
 class ScanRequest:
-    """Input contract for a Difend scan.
-
-    repository_path:
-        Git repository to scan.
-    output_root:
-        Directory where future scan bundles will be written.
-    include_staged:
-        Capture staged changes from the Git index.
-    include_unstaged:
-        Capture unstaged working tree changes.
-    include_untracked:
-        Capture new files that have not been added to the Git index.
-    """
+    """Input contract for a Difend scan."""
 
     repository_path: Path
     output_root: Path = Path(".difend/runs")
     include_staged: bool = True
     include_unstaged: bool = True
     include_untracked: bool = True
+    model: str | None = None
+    use_cache: bool = True
 
     @classmethod
     def from_path(
         cls,
         repository_path: str | Path = ".",
         output_root: str | Path = ".difend/runs",
+        model: str | None = None,
     ) -> "ScanRequest":
         return cls(
             repository_path=Path(repository_path),
             output_root=Path(output_root),
+            model=model,
         )
 
 
 @dataclass(frozen=True)
 class ScanReport:
-    """Output contract returned by a Difend scan.
-
-    name:
-        Human-readable workflow name.
-    scan_id:
-        Stable identifier for this run.
-    repository_path:
-        Git repository that was scanned.
-    output_folder:
-        Future bundle location for this run.
-    status:
-        Final scan status.
-    diff:
-        Exact staged and unstaged diff content captured for the scan.
-    """
+    """Output contract returned by a Difend scan."""
 
     name: str
     scan_id: str
@@ -76,24 +66,54 @@ class ScanReport:
     output_folder: Path
     status: ScanStatus
     diff: CodeDiff
+    risk_areas: list[RiskArea] = field(default_factory=list)
+    expanded_context: ExpandedContext = field(default_factory=ExpandedContext)
+    findings: list[Finding] = field(default_factory=list)
+    manual_review: list[ManualReviewItem] = field(default_factory=list)
+    suppressed_findings: list[Finding] = field(default_factory=list)
+    suppressed_manual_review: list[ManualReviewItem] = field(default_factory=list)
+    risk_score: int = 0
+    handoff: HandoffResult = field(default_factory=HandoffResult)
+    agents: list[AgentExecution] = field(default_factory=list)
+    model: str = DEFAULT_MODEL
+    cache_hit: bool = False
 
 
 class DifendSDK:
     """Reusable SDK entry point for running Difend workflows."""
 
     def scan(self, request: ScanRequest) -> ScanReport:
+        load_environment(request.repository_path)
         diff = GitDiffCapture(request.repository_path).capture(
             include_staged=request.include_staged,
             include_unstaged=request.include_unstaged,
             include_untracked=request.include_untracked,
         )
-        status = ScanStatus.PASS
+        model = request.model or os.getenv("DIFEND_OPENAI_MODEL") or DEFAULT_MODEL
+        agentic_result = run_agentic_scan(
+            request.repository_path,
+            diff,
+            model=model,
+            use_cache=request.use_cache,
+        )
+        status = ScanStatus(agentic_result.status)
         bundle = ScanBundleWriter().write(
             ScanBundleRequest(
                 repository_path=request.repository_path,
                 output_root=request.output_root,
                 status=status.value,
                 diff=diff,
+                risk_areas=agentic_result.classifier.risk_areas,
+                expanded_context=agentic_result.expanded_context,
+                findings=agentic_result.gates.findings,
+                manual_review=agentic_result.manual_review,
+                suppressed_findings=agentic_result.suppressed_findings,
+                suppressed_manual_review=agentic_result.suppressed_manual_review,
+                risk_score=agentic_result.risk_score,
+                handoff=agentic_result.handoff,
+                agents=agentic_result.agents,
+                model=agentic_result.model,
+                cache_hit=agentic_result.cache_hit,
             )
         )
 
@@ -104,17 +124,30 @@ class DifendSDK:
             output_folder=bundle.output_folder,
             status=status,
             diff=diff,
+            risk_areas=agentic_result.classifier.risk_areas,
+            expanded_context=agentic_result.expanded_context,
+            findings=agentic_result.gates.findings,
+            manual_review=agentic_result.manual_review,
+            suppressed_findings=agentic_result.suppressed_findings,
+            suppressed_manual_review=agentic_result.suppressed_manual_review,
+            risk_score=agentic_result.risk_score,
+            handoff=agentic_result.handoff,
+            agents=agentic_result.agents,
+            model=agentic_result.model,
+            cache_hit=agentic_result.cache_hit,
         )
 
 
 def scan(
     repository_path: str | Path = ".",
     output_root: str | Path = ".difend/runs",
+    model: str | None = None,
 ) -> ScanReport:
     """Run a Difend scan through the default SDK instance."""
 
     request = ScanRequest.from_path(
         repository_path=repository_path,
         output_root=output_root,
+        model=model,
     )
     return DifendSDK().scan(request)

@@ -26,22 +26,68 @@ This means Difend supports two workflows at the same time: quick local security 
 
 ## AI Agent System
 
-Difend is agent-based because the scan is split into focused review roles. Each agent receives the current diff, makes a bounded security judgement, and returns structured output that the SDK merges into the final report.
+Difend is agent-based because the scan is split into focused review roles. Each agent receives bounded scan context, makes a bounded security judgement, and returns structured output that the SDK merges into the final report.
 
-The first version of Difend should use three agents:
+The implementation uses a coordinator-led agentic architecture:
 
+```text
+prepare_scan_context
+  |
+  v
+diff_classifier (heuristic -> optional LLM)
+  |
+  v
+orchestrator_route
+  |-- automated_gates
+  |     `-- optional LLM validation
+  |
+  |-- context_expansion (bounded + security-aware)
+  |
+  |-- security_reasoning (conditional)
+  |
+  v
+orchestrator_merge
+  - dedupe with enhanced key
+  - enforce Automated Gates priority
+  - remove overlap
+  |
+  v
+handoff (no new findings)
+  |
+  v
+orchestrator_finalize
+```
+
+The Agent Orchestrator is deterministic LangGraph control flow. It routes work, merges output, applies cache/feedback, removes duplicates, and decides final status. It does not perform deep security review.
+
+Difend uses four specialist agents:
+
+- **Diff Classifier Agent:** classifies changed files and added lines into fixed risk areas. It uses heuristics first and only calls the LLM when a diff is not confidently low risk.
 - **Automated Gates Agent:** checks the diff for concrete security problems such as hardcoded secrets, dangerous dependency changes, injection patterns, unsafe shell execution, weak cryptography, and sensitive data exposure.
-- **Security Review Agent:** looks for suspicious changes that may require deeper judgement, especially authentication, authorisation, privilege boundaries, sessions, personal data, database access, file access, payments, and cryptography.
-- **Handoff Agent:** turns the scan result into clear follow-up context for Codex or another AI coding assistant, including what was scanned, what was found, which files to inspect next, and the safest next action.
+- **Security Reasoning Agent:** looks for suspicious changes that may require deeper judgement, especially authentication, authorisation, privilege boundaries, sessions, personal data, database access, file access, payments, and cryptography. It outputs manual review items only.
+- **Handoff Agent:** turns the merged scan result into clear follow-up context for Codex or another AI coding assistant, including what was scanned, what was found, which files to inspect next, and the safest next action. It does not introduce new findings.
 
 The SDK acts as the coordinator. It captures the diff, runs the agents, combines their outputs, decides the final status, and writes the scan bundle.
 
 Agent outputs should be structured so they can be written to both Markdown and JSON:
 
+- `risk_areas`: risk categories found by the Diff Classifier Agent.
 - `findings`: concrete security issues found by the Automated Gates Agent.
-- `manual_review`: uncertain or context-dependent risks found by the Security Review Agent.
+- `manual_review`: uncertain or context-dependent risks found by the Security Reasoning Agent.
 - `codex_instructions`: follow-up instructions produced by the Handoff Agent.
 - `status`: final result of `pass`, `fail`, or `manual review required`.
+
+The final status is deterministic:
+
+- Any active Automated Gates finding produces `fail`.
+- If there are no active findings but there are manual review items, status is `manual review required`.
+- If neither exists, status is `pass`.
+
+Configuration:
+
+- `OPENAI_API_KEY` is required only when a non-low-risk diff needs an LLM-backed agent.
+- `DIFEND_OPENAI_MODEL` optionally overrides the default model, `gpt-5.4-mini`.
+- LangSmith tracing is optional and follows the standard LangChain environment variables when configured.
 
 ## Workflow
 
@@ -59,10 +105,11 @@ difend scan
 3. The command triggers the `difend SDK`.
 4. The `difend SDK` captures the current code diff from the Git working tree.
 5. Difend creates a scan output folder for the current run.
-6. The SDK sends the diff into three focused agent review directions:
+6. The SDK sends the diff through the LangGraph agentic workflow:
 
-- **Automated Gates Agent:** detects common vulnerabilities in the diff, such as leaked secrets, vulnerable dependencies, injection risks, unsafe auth changes, weak cryptography, and sensitive data exposure. This should handle around 80% of routine security detection.
-- **Security Review Agent:** looks for suspicious code that may contain deeper flaws. The agent starts from the diff, traces related files only when needed, and asks for manual review when the code may affect authentication, authorisation, privilege boundaries, secrets, personal data, database queries, file access, payments, cryptography, or session management. This should handle around 20% of cases where human verification is required.
+- **Diff Classifier Agent:** classifies the diff into fixed risk areas using heuristics first and optional LLM structured output.
+- **Automated Gates Agent:** detects concrete vulnerabilities in the diff, such as leaked secrets, vulnerable dependencies, injection risks, unsafe auth changes, weak cryptography, and sensitive data exposure.
+- **Security Reasoning Agent:** conditionally analyzes deeper contextual risk and outputs manual-review items only.
 - **Handoff Agent:** prepares the Codex follow-up instructions so the developer can continue safely without re-explaining the scan context.
 
 7. Difend prints progress in the terminal while each check runs.
@@ -86,8 +133,10 @@ Example:
 Difend scan started
 
 Checking git diff... done
+Running Diff Classifier Agent... done
 Running Automated Gates Agent... done
-Running Security Review Agent... manual review required
+Running Context Expansion... done
+Running Security Reasoning Agent... manual review required
 Running Handoff Agent... done
 
 Status: manual review required
@@ -116,7 +165,7 @@ Example:
 The final scan bundle should include:
 
 - Automated Gates Agent findings
-- Security Review Agent risks that require human verification
+- Security Reasoning Agent risks that require human verification
 - Files and lines involved
 - Recommended fixes
 - Manual review checklist
@@ -145,75 +194,58 @@ Every scan should leave enough context for a future reviewer or AI coding assist
 - What should Codex inspect next?
 - What is the safest next action for the developer?
 
-Core principle: review the diff first, trace context only when needed, and escalate uncertain security risks to a human or AI-assisted follow-up review with clear evidence.
+Core principle: review the diff first, expand only bounded security-aware context when needed, and escalate uncertain security risks to a human or AI-assisted follow-up review with clear evidence.
 
-## Roadmap
+## Development Setup
 
-### 28/04/2026
-- Agreement on final idea.
-- Find resources for implementation.
+Create and activate a virtual environment:
 
-### 29/04/2026
-- Implement the first version of the `difend scan` command.
-- Implement code diff capture from the current Git working tree.
-- Define the core `difend SDK` interface:
-  - input: repository path and diff
-  - output: structured security report, final status, and scan output folder
-- Create `.difend/runs/<run-id>/` for each scan.
-- Write the first scan bundle files:
-  - `summary.md`
-  - `findings.md`
-  - `manual-review.md`
-  - `codex-instructions.md`
-  - `diff.patch`
-  - `report.json`
-- Build the first agent runner.
-- Add initial Automated Gates Agent checks:
-  - secrets scanning
-  - dependency change detection
-  - simple injection pattern checks
-  - risky authentication or authorisation change detection
-- Define a shared finding format with file, line, severity, evidence, gate name, and recommendation.
-- Combine agent results into one partial report.
-- Print progress for each check in the terminal.
-- Make `codex-instructions.md` useful as a direct handoff prompt for Codex.
-- Test the command against small sample diffs.
+```bash
+python -m venv .venv
+```
 
-Goal for the day: `difend scan` can capture a diff, run basic review agents, print terminal progress, and write a structured scan bundle to `.difend/runs/<run-id>/` that developers can hand to Codex for follow-up.
+On Windows PowerShell:
 
-### 30/04/2026
-- Implement the Security Review Agent.
-- Detect when changed code may require human verification, especially changes involving:
-  - authentication
-  - authorisation
-  - privilege boundaries
-  - secrets
-  - sensitive data
-  - database queries
-  - file access
-  - payments
-  - cryptography
-  - session management
-- Add related-file tracing from the diff:
-  - called functions
-  - imported modules
-  - route handlers
-  - auth helpers
-  - data models
-  - related tests
-- Generate a manual review checklist when suspicious security risk is found.
-- Merge automated gate findings and security risk findings into one final report.
-- Write `manual-review.md` for suspicious changes that need deeper review.
-- Improve `codex-instructions.md` so developers can ask Codex to read the scan bundle and continue the security review.
-- Implement final statuses:
-  - `pass`
-  - `fail`
-  - `manual review required`
-- Polish CLI output for developer readability.
-- Run end-to-end tests on sample vulnerable diffs.
-- Document known limitations and next steps.
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
-Goal for the day: Difend can run the full two-direction workflow and produce a final diff-only security review report with Markdown files that support Codex-assisted follow-up.
+Install the package and test dependencies:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
+```
+
+Configure OpenAI when model-backed nodes are needed:
+
+```bash
+OPENAI_API_KEY=...
+DIFEND_OPENAI_MODEL=gpt-5.4-mini
+```
+
+You can also put these values in a local `.env` file at the repository root:
+
+```text
+OPENAI_API_KEY=your_api_key_here
+DIFEND_OPENAI_MODEL=gpt-5.4-mini
+```
+
+`.env` is ignored by Git. Keep `.env.example` committed as the safe template.
+
+Run tests:
+
+```bash
+python -m pytest
+```
+
+## Feedback
+
+Difend stores local feedback under `.difend/feedback/`. Exact false-positive matches can be suppressed only when the finding or manual-review fingerprint matches.
+
+```bash
+difend feedback --run-id <run-id> --finding-id <finding-id> --label false_positive
+```
 
 ## Resources
 - [**Resource 1:** AI-Generated Code Security Risks - Why Vulnerabilities Increase 2.74x and How to Prevent Them](https://www.softwareseni.com/ai-generated-code-security-risks-why-vulnerabilities-increase-2-74x-and-how-to-prevent-them/)

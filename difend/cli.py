@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 
+from difend.commands.feedback import run_feedback
 from difend.commands.scan import run_scan
 
 
@@ -19,6 +20,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scan the current Git diff.",
     )
     scan_parser.set_defaults(handler=run_scan)
+
+    feedback_parser = subparsers.add_parser(
+        "feedback",
+        help="Record feedback for a previous scan finding.",
+    )
+    feedback_parser.add_argument("--run-id", required=True)
+    feedback_parser.add_argument("--finding-id", required=True)
+    feedback_parser.add_argument(
+        "--label",
+        required=True,
+        choices=["false_positive"],
+    )
+    feedback_parser.add_argument("--reason", default="")
+    feedback_parser.set_defaults(handler=run_feedback)
 
     return parser
 

@@ -1,5 +1,6 @@
 """Difend package."""
 
+from difend.agents import AgenticScanError, AgenticScanResult
 from difend.bundle import ScanBundle, ScanBundleRequest, ScanBundleWriter
 from difend.diff import CodeDiff, DiffCaptureError, GitDiffCapture
 from difend.sdk import DifendSDK, ScanReport, ScanRequest, ScanStatus, scan
@@ -7,6 +8,8 @@ from difend.sdk import DifendSDK, ScanReport, ScanRequest, ScanStatus, scan
 __version__ = "0.1.0"
 
 __all__ = [
+    "AgenticScanError",
+    "AgenticScanResult",
     "CodeDiff",
     "DiffCaptureError",
     "DifendSDK",
