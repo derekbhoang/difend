@@ -29,11 +29,13 @@ class ScanCommandTests(unittest.TestCase):
             )
 
             self.assertEqual(report.status, ScanStatus.MANUAL_REVIEW_REQUIRED)
-            self.assertEqual(len(report.findings), 1)
-            self.assertEqual(report.findings[0].gate, "injection risks")
+            self.assertEqual(len(report.rule_signals), 1)
+            self.assertEqual(report.rule_signals[0].gate, "injection risks")
             self.assertTrue((report.output_folder / "summary.md").exists())
+            self.assertTrue((report.output_folder / "context-signals.md").exists())
             self.assertTrue((report.output_folder / "findings.md").exists())
             self.assertTrue((report.output_folder / "manual-review.md").exists())
+            self.assertTrue((report.output_folder / "solution-proposals.md").exists())
             self.assertTrue((report.output_folder / "codex-instructions.md").exists())
             self.assertTrue((report.output_folder / "diff.patch").exists())
             self.assertTrue((report.output_folder / "report.json").exists())
@@ -44,14 +46,28 @@ class ScanCommandTests(unittest.TestCase):
                 (report.output_folder / "report.json").read_text(encoding="utf-8")
             )
             self.assertEqual(report_json["status"], "manual review required")
-            self.assertEqual(report_json["findings"][0]["gate"], "injection risks")
+            self.assertEqual(report_json["tool"], "difend")
+            self.assertEqual(report_json["rule_signals"][0]["gate"], "injection risks")
+            self.assertEqual(report_json["findings"], [])
             self.assertEqual(report_json["diff"]["changed_files"], ["app.py"])
+            self.assertEqual(report_json["checks"][2]["signals_count"], 1)
+
+            context_signals = (
+                report.output_folder / "context-signals.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("Context Signals", context_signals)
+            self.assertIn("eval(user_input)", context_signals)
+
+            findings_markdown = (
+                report.output_folder / "findings.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("No agent-confirmed findings", findings_markdown)
 
             codex_instructions = (
                 report.output_folder / "codex-instructions.md"
             ).read_text(encoding="utf-8")
             self.assertIn("Codex Handoff Prompt", codex_instructions)
-            self.assertIn("Read `diff.patch`", codex_instructions)
+            self.assertIn("Read `report.json` first", codex_instructions)
 
     def test_scan_cli_prints_progress_and_writes_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

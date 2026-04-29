@@ -87,8 +87,10 @@ Example:
   runs/
     2026-04-29-001/
       summary.md
+      context-signals.md
       findings.md
       manual-review.md
+      solution-proposals.md
       codex-instructions.md
       diff.patch
       report.json
@@ -96,10 +98,11 @@ Example:
 
 The final scan bundle should include:
 
-- Automated gate findings
+- Rule-based automated gate signals
+- Agent-confirmed findings, when a later review step has produced them
 - Security risks that require human verification
 - Files and lines involved
-- Recommended fixes
+- Recommended fixes or solution proposals
 - Manual review checklist
 - Codex follow-up instructions
 - The exact diff that was scanned
@@ -108,11 +111,18 @@ The final scan bundle should include:
 Suggested file responsibilities:
 
 - `summary.md`: human-readable scan summary, final status, checks performed, and next steps.
-- `findings.md`: concrete automated gate findings with severity, evidence, location, and recommendation.
+- `context-signals.md`: rule-based automated gate signals collected as context for Codex or another review agent.
+- `findings.md`: agent-confirmed findings with severity, evidence, location, agent name, and recommendation. Automated gates should not write final confirmed findings directly.
 - `manual-review.md`: suspicious areas that require human or AI-assisted security judgment.
+- `solution-proposals.md`: non-mutating proposed fixes, implementation notes, suggested tests, and caveats for developers and Codex.
 - `codex-instructions.md`: a focused prompt-style handoff file that tells Codex what was scanned, what needs deeper review, which files to inspect, and how to continue the developer's task safely.
 - `diff.patch`: the exact Git diff that Difend scanned.
-- `report.json`: structured machine-readable report for future integrations, CI, IDE plugins, and AI coding tools.
+- `report.json`: structured machine-readable report for future integrations, CI, IDE plugins, dashboards, Codex, and downstream AI agents. Automated gates write `rule_signals` here; later LLM or agent review can use those signals to produce `findings.md`.
+
+The first implementation separates the workflow into two commands:
+
+- `difend scan`: captures the Git diff, runs rule-based automated gates, and writes `report.json` plus context files.
+- `difend review`: calls the Codex agent layer through the OpenAI Responses API, reads `report.json` and `diff.patch`, then writes agent-confirmed `findings.md` and `solution-proposals.md`.
 
 ### Context Handoff Contract
 
@@ -164,7 +174,7 @@ python3 -m unittest discover
 Expected result:
 
 ```text
-Ran 9 tests
+Ran 11 tests
 OK
 ```
 
@@ -244,7 +254,7 @@ Report written to: .difend/runs/<run-id>
 Next: ask Codex to read .difend/runs/<run-id>/codex-instructions.md
 ```
 
-The status is `manual review required` because the injection gate found `eval(user_input)`.
+The status is `manual review required` because the injection gate produced a rule signal for `eval(user_input)`.
 
 ### 6. Read the Scan Bundle
 
@@ -260,13 +270,13 @@ Read the human summary:
 cat "$RUN/summary.md"
 ```
 
-Read the automated findings:
+Read the rule-based context signals:
 
 ```bash
-cat "$RUN/findings.md"
+cat "$RUN/context-signals.md"
 ```
 
-Expected finding:
+Expected signal:
 
 ```text
 risky_app.py:2
@@ -275,15 +285,73 @@ Severity: high
 Evidence: return eval(user_input)
 ```
 
+Read the machine-readable report that Codex or a downstream agent should use as its main input:
+
+```bash
+cat "$RUN/report.json"
+```
+
+In the JSON, automated gates write to `rule_signals`. The `findings` array is reserved for later LLM or agent-confirmed findings.
+
+Read the current findings file:
+
+```bash
+cat "$RUN/findings.md"
+```
+
+Expected result before the LLM or agent review step:
+
+```text
+No agent-confirmed findings have been generated yet.
+```
+
 Read the Codex handoff prompt:
 
 ```bash
 cat "$RUN/codex-instructions.md"
 ```
 
-That file is meant to be handed to Codex or another reviewer so they can continue the security review with the exact diff, findings, and suggested next steps.
+That file is meant to be handed to Codex or another reviewer so they can read `report.json`, inspect the exact diff, validate the rule signals, and produce confirmed findings or solution proposals.
 
-### 7. Fix the Risky Code
+### 7. Run the Codex Agent Review
+
+The scan step does not call an LLM. It only writes rule-based context into `report.json`.
+
+To ask the Codex agent layer to confirm findings, set `OPENAI_API_KEY` and run:
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+PYTHONPATH="$DIFEND_SRC" python3 -m difend review "$RUN"
+```
+
+By default, the agent client uses `gpt-5.1-codex` through the OpenAI Responses API. You can override the model with:
+
+```bash
+PYTHONPATH="$DIFEND_SRC" python3 -m difend review "$RUN" --model gpt-5.1-codex
+```
+
+Expected terminal output includes:
+
+```text
+Difend agent review started
+
+Status: manual review required
+Findings written to: .difend/runs/<run-id>/findings.md
+Solution proposals written to: .difend/runs/<run-id>/solution-proposals.md
+Report updated: .difend/runs/<run-id>/report.json
+```
+
+After the review step, read the agent-confirmed findings and proposed fixes:
+
+```bash
+cat "$RUN/findings.md"
+cat "$RUN/solution-proposals.md"
+cat "$RUN/report.json"
+```
+
+The agent should use `report.json.rule_signals` and `diff.patch` as context, then write confirmed issues into `findings.md` and non-mutating fix ideas into `solution-proposals.md`.
+
+### 8. Fix the Risky Code
 
 Replace the unsafe `eval` call with a harmless return for this demo:
 
@@ -294,7 +362,7 @@ def run_user_code(user_input):
 PY
 ```
 
-### 8. Scan Again
+### 9. Scan Again
 
 ```bash
 PYTHONPATH="$DIFEND_SRC" python3 -m difend scan
@@ -307,20 +375,22 @@ Checking injection risks... done
 Status: pass
 ```
 
-Open the latest findings report:
+Open the latest context signals and findings reports:
 
 ```bash
 RUN=$(ls -td .difend/runs/* | head -1)
+cat "$RUN/context-signals.md"
 cat "$RUN/findings.md"
 ```
 
 Expected result:
 
 ```text
-No automated gate findings were detected.
+No rule-based context signals were detected.
+No agent-confirmed findings have been generated yet.
 ```
 
-### 9. Clean Up the Demo Repository
+### 10. Clean Up the Demo Repository
 
 When you are finished:
 
@@ -336,11 +406,12 @@ rm -rf "$DEMO"
 2. Add a risky file containing eval(user_input).
 3. Run difend scan.
 4. Difend captures the Git diff and scans only added lines.
-5. The injection gate reports a high-risk finding.
-6. Read summary.md, findings.md, and codex-instructions.md.
-7. Fix the risky code.
-8. Run difend scan again.
-9. The scan passes when no automated gate findings remain.
+5. The injection gate writes a high-risk rule signal into report.json.
+6. Read summary.md, context-signals.md, report.json, and codex-instructions.md.
+7. Run difend review to call the Codex agent and produce findings.md.
+8. Fix the risky code.
+9. Run difend scan again.
+10. The scan passes when no rule-based context signals remain.
 ```
 
 ## Roadmap

@@ -15,7 +15,7 @@ from difend.gates import (
 
 class GateTests(unittest.TestCase):
     def test_secrets_gate_flags_secret_added_lines(self) -> None:
-        findings = SecretsGate().run(
+        signals = SecretsGate().run(
             parse_diff(
                 """diff --git a/settings.py b/settings.py
 --- a/settings.py
@@ -26,14 +26,14 @@ class GateTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].gate, "secrets")
-        self.assertEqual(findings[0].severity, "critical")
-        self.assertEqual(findings[0].file, "settings.py")
-        self.assertIn("[redacted]", findings[0].evidence)
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].gate, "secrets")
+        self.assertEqual(signals[0].severity, "critical")
+        self.assertEqual(signals[0].file, "settings.py")
+        self.assertIn("[redacted]", signals[0].evidence)
 
     def test_dependency_gate_flags_dependency_file_added_lines(self) -> None:
-        findings = DependencyChangeGate().run(
+        signals = DependencyChangeGate().run(
             parse_diff(
                 """diff --git a/pyproject.toml b/pyproject.toml
 --- a/pyproject.toml
@@ -44,13 +44,13 @@ class GateTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].gate, "dependency changes")
-        self.assertEqual(findings[0].severity, "medium")
-        self.assertEqual(findings[0].line, 1)
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].gate, "dependency changes")
+        self.assertEqual(signals[0].severity, "medium")
+        self.assertEqual(signals[0].line, 1)
 
     def test_injection_gate_flags_simple_injection_patterns(self) -> None:
-        findings = InjectionPatternGate().run(
+        signals = InjectionPatternGate().run(
             parse_diff(
                 """diff --git a/app.py b/app.py
 --- a/app.py
@@ -61,12 +61,12 @@ class GateTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].gate, "injection risks")
-        self.assertEqual(findings[0].severity, "high")
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].gate, "injection risks")
+        self.assertEqual(signals[0].severity, "high")
 
     def test_auth_gate_marks_security_sensitive_changes_for_manual_review(self) -> None:
-        findings = AuthPermissionGate().run(
+        signals = AuthPermissionGate().run(
             parse_diff(
                 """diff --git a/auth.py b/auth.py
 --- a/auth.py
@@ -77,10 +77,10 @@ class GateTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].gate, "auth and permission changes")
-        self.assertEqual(findings[0].severity, SEVERITY_MANUAL_REVIEW)
-        self.assertTrue(findings[0].requires_manual_review)
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].gate, "auth and permission changes")
+        self.assertEqual(signals[0].severity, SEVERITY_MANUAL_REVIEW)
+        self.assertTrue(signals[0].requires_manual_review)
 
     def test_gate_runner_combines_results_and_reports_progress(self) -> None:
         progress: list[tuple[str, str]] = []
@@ -95,8 +95,9 @@ class GateTests(unittest.TestCase):
 
         report = GateRunner().run(parsed, progress=lambda label, status: progress.append((label, status)))
 
-        self.assertTrue(report.findings)
+        self.assertTrue(report.rule_signals)
         self.assertEqual(len(report.gate_results), 4)
+        self.assertEqual(report.gate_results[2].signals_count, 1)
         self.assertIn(("Checking injection risks", "warning"), progress)
         self.assertIn(("Checking auth and permission changes", "done"), progress)
 

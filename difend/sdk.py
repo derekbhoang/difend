@@ -9,7 +9,7 @@ from pathlib import Path
 
 from difend.bundle import ScanBundleWriter, ScanBundleRequest
 from difend.diff import CodeDiff, GitDiffCapture, ParsedDiff, parse_code_diff
-from difend.gates import Finding, GateResult, GateRunner
+from difend.gates import RuleSignal, GateResult, GateRunner
 
 
 class ScanStatus(str, Enum):
@@ -78,8 +78,8 @@ class ScanReport:
         Exact staged and unstaged diff content captured for the scan.
     parsed_diff:
         Structured view of changed files and added lines.
-    findings:
-        Combined automated gate findings.
+    rule_signals:
+        Combined rule-based automated gate signals.
     """
 
     name: str
@@ -89,7 +89,7 @@ class ScanReport:
     status: ScanStatus
     diff: CodeDiff
     parsed_diff: ParsedDiff
-    findings: tuple[Finding, ...]
+    rule_signals: tuple[RuleSignal, ...]
     gate_results: tuple[GateResult, ...]
 
 
@@ -110,7 +110,7 @@ class DifendSDK:
             parsed_diff,
             progress=request.progress,
         )
-        status = _status_from_findings(gate_report.findings)
+        status = _status_from_rule_signals(gate_report.rule_signals)
         bundle = ScanBundleWriter().write(
             ScanBundleRequest(
                 repository_path=request.repository_path,
@@ -118,7 +118,7 @@ class DifendSDK:
                 status=status.value,
                 diff=diff,
                 parsed_diff=parsed_diff,
-                findings=gate_report.findings,
+                rule_signals=gate_report.rule_signals,
                 gate_results=gate_report.gate_results,
             )
         )
@@ -131,7 +131,7 @@ class DifendSDK:
             status=status,
             diff=diff,
             parsed_diff=parsed_diff,
-            findings=gate_report.findings,
+            rule_signals=gate_report.rule_signals,
             gate_results=gate_report.gate_results,
         )
 
@@ -151,11 +151,8 @@ def scan(
     return DifendSDK().scan(request)
 
 
-def _status_from_findings(findings: tuple[Finding, ...]) -> ScanStatus:
-    if any(finding.severity == "critical" for finding in findings):
-        return ScanStatus.FAIL
-
-    if findings:
+def _status_from_rule_signals(rule_signals: tuple[RuleSignal, ...]) -> ScanStatus:
+    if rule_signals:
         return ScanStatus.MANUAL_REVIEW_REQUIRED
 
     return ScanStatus.PASS

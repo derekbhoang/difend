@@ -17,8 +17,8 @@ ProgressFn = Callable[[str, str], None]
 
 
 @dataclass(frozen=True)
-class Finding:
-    """Shared finding format returned by every automated gate."""
+class RuleSignal:
+    """Rule-based signal returned by an automated gate."""
 
     file: str
     line: int | None
@@ -32,32 +32,49 @@ class Finding:
         return asdict(self)
 
 
+Finding = RuleSignal
+
+
 @dataclass(frozen=True)
 class GateResult:
     """Summary of one gate execution."""
 
     gate: str
     status: str
-    findings_count: int
+    signals_count: int
+    findings_count: int = 0
+    manual_review_count: int = 0
+    message: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return {
+            "agent": self.gate,
+            "status": self.status,
+            "signals_count": self.signals_count,
+            "findings_count": self.findings_count,
+            "manual_review_count": self.manual_review_count,
+            "message": self.message,
+        }
 
 
 @dataclass(frozen=True)
 class GateRunReport:
     """Combined partial report from all automated gates."""
 
-    findings: tuple[Finding, ...]
+    rule_signals: tuple[RuleSignal, ...]
     gate_results: tuple[GateResult, ...]
 
     @property
-    def manual_review_findings(self) -> tuple[Finding, ...]:
+    def findings(self) -> tuple[RuleSignal, ...]:
+        return self.rule_signals
+
+    @property
+    def manual_review_findings(self) -> tuple[RuleSignal, ...]:
         return tuple(
-            finding
-            for finding in self.findings
-            if finding.requires_manual_review
-            or finding.severity == SEVERITY_MANUAL_REVIEW
+            signal
+            for signal in self.rule_signals
+            if signal.requires_manual_review
+            or signal.severity == SEVERITY_MANUAL_REVIEW
         )
 
 
@@ -68,8 +85,8 @@ class Gate(ABC):
     progress_label: ClassVar[str]
 
     @abstractmethod
-    def run(self, parsed_diff: ParsedDiff) -> list[Finding]:
-        """Return findings for the parsed diff."""
+    def run(self, parsed_diff: ParsedDiff) -> list[RuleSignal]:
+        """Return rule-based signals for the parsed diff."""
 
 
 class GateRunner:
@@ -83,25 +100,26 @@ class GateRunner:
         parsed_diff: ParsedDiff,
         progress: ProgressFn | None = None,
     ) -> GateRunReport:
-        findings: list[Finding] = []
+        rule_signals: list[RuleSignal] = []
         gate_results: list[GateResult] = []
 
         for gate in self.gates:
             _progress(progress, gate.progress_label, "in progress")
-            gate_findings = gate.run(parsed_diff)
-            findings.extend(gate_findings)
-            status = _gate_status(gate_findings)
+            gate_signals = gate.run(parsed_diff)
+            rule_signals.extend(gate_signals)
+            status = _gate_status(gate_signals)
             gate_results.append(
                 GateResult(
                     gate=gate.name,
                     status=status,
-                    findings_count=len(gate_findings),
+                    signals_count=len(gate_signals),
+                    manual_review_count=_manual_review_count(gate_signals),
                 )
             )
             _progress(progress, gate.progress_label, status)
 
         return GateRunReport(
-            findings=tuple(findings),
+            rule_signals=tuple(rule_signals),
             gate_results=tuple(gate_results),
         )
 
@@ -120,12 +138,12 @@ class SecretsGate(Gate):
         re.compile(r"\b(ghp_[A-Za-z0-9_]{20,})\b"),
     )
 
-    def run(self, parsed_diff: ParsedDiff) -> list[Finding]:
-        findings: list[Finding] = []
+    def run(self, parsed_diff: ParsedDiff) -> list[RuleSignal]:
+        rule_signals: list[RuleSignal] = []
         for line in parsed_diff.added_lines:
             if any(pattern.search(line.content) for pattern in self.SECRET_PATTERNS):
-                findings.append(
-                    Finding(
+                rule_signals.append(
+                    RuleSignal(
                         gate=self.name,
                         severity="critical",
                         file=line.file,
@@ -139,7 +157,7 @@ class SecretsGate(Gate):
                     )
                 )
 
-        return findings
+        return rule_signals
 
 
 class DependencyChangeGate(Gate):
@@ -165,8 +183,8 @@ class DependencyChangeGate(Gate):
         "Cargo.lock",
     }
 
-    def run(self, parsed_diff: ParsedDiff) -> list[Finding]:
-        findings: list[Finding] = []
+    def run(self, parsed_diff: ParsedDiff) -> list[RuleSignal]:
+        rule_signals: list[RuleSignal] = []
 
         for file_path in parsed_diff.changed_files:
             if PurePosixPath(file_path).name not in self.DEPENDENCY_FILES:
@@ -176,8 +194,8 @@ class DependencyChangeGate(Gate):
             if first_added_line is None:
                 continue
 
-            findings.append(
-                Finding(
+            rule_signals.append(
+                RuleSignal(
                     gate=self.name,
                     severity="medium",
                     file=file_path,
@@ -190,7 +208,7 @@ class DependencyChangeGate(Gate):
                 )
             )
 
-        return findings
+        return rule_signals
 
 
 class InjectionPatternGate(Gate):
@@ -207,13 +225,13 @@ class InjectionPatternGate(Gate):
         re.compile(r"\bSELECT\b.+\+.+\bFROM\b", re.IGNORECASE),
     )
 
-    def run(self, parsed_diff: ParsedDiff) -> list[Finding]:
-        findings: list[Finding] = []
+    def run(self, parsed_diff: ParsedDiff) -> list[RuleSignal]:
+        rule_signals: list[RuleSignal] = []
 
         for line in parsed_diff.added_lines:
             if any(pattern.search(line.content) for pattern in self.INJECTION_PATTERNS):
-                findings.append(
-                    Finding(
+                rule_signals.append(
+                    RuleSignal(
                         gate=self.name,
                         severity="high",
                         file=line.file,
@@ -227,7 +245,7 @@ class InjectionPatternGate(Gate):
                     )
                 )
 
-        return findings
+        return rule_signals
 
 
 class AuthPermissionGate(Gate):
@@ -254,8 +272,8 @@ class AuthPermissionGate(Gate):
         "logout",
     }
 
-    def run(self, parsed_diff: ParsedDiff) -> list[Finding]:
-        findings: list[Finding] = []
+    def run(self, parsed_diff: ParsedDiff) -> list[RuleSignal]:
+        rule_signals: list[RuleSignal] = []
         seen_locations: set[str] = set()
 
         for line in parsed_diff.added_lines:
@@ -269,8 +287,8 @@ class AuthPermissionGate(Gate):
                 continue
             seen_locations.add(key)
 
-            findings.append(
-                Finding(
+            rule_signals.append(
+                RuleSignal(
                     gate=self.name,
                     severity=SEVERITY_MANUAL_REVIEW,
                     file=line.file,
@@ -285,7 +303,7 @@ class AuthPermissionGate(Gate):
                 )
             )
 
-        return findings
+        return rule_signals
 
     def _is_security_sensitive(self, file_lower: str, content_lower: str) -> bool:
         return any(
@@ -311,18 +329,27 @@ def _first_added_line(parsed_diff: ParsedDiff, file_path: str) -> DiffLine | Non
     return None
 
 
-def _gate_status(findings: list[Finding]) -> str:
-    if not findings:
+def _gate_status(rule_signals: list[RuleSignal]) -> str:
+    if not rule_signals:
         return "done"
 
     if any(
-        finding.requires_manual_review
-        or finding.severity == SEVERITY_MANUAL_REVIEW
-        for finding in findings
+        signal.requires_manual_review
+        or signal.severity == SEVERITY_MANUAL_REVIEW
+        for signal in rule_signals
     ):
         return SEVERITY_MANUAL_REVIEW
 
     return "warning"
+
+
+def _manual_review_count(rule_signals: list[RuleSignal]) -> int:
+    return sum(
+        1
+        for signal in rule_signals
+        if signal.requires_manual_review
+        or signal.severity == SEVERITY_MANUAL_REVIEW
+    )
 
 
 def _progress(progress: "ProgressFn | None", label: str, status: str) -> None:
