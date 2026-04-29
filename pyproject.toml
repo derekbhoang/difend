@@ -1,0 +1,8 @@
+[project]
+name = "difend"
+version = "0.1.0"
+description = "Diff-aware security review SDK and CLI."
+requires-python = ">=3.10"
+
+[project.scripts]
+difend = "difend.cli:main"
