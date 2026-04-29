@@ -8,7 +8,12 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from difend.diff import CodeDiff
+from difend.diff import CodeDiff, ParsedDiff
+from difend.gates import (
+    SEVERITY_MANUAL_REVIEW,
+    Finding,
+    GateResult,
+)
 
 
 BUNDLE_FILE_NAMES = (
@@ -61,6 +66,9 @@ class ScanBundleRequest:
     output_root: Path
     status: str
     diff: CodeDiff
+    parsed_diff: ParsedDiff
+    findings: tuple[Finding, ...]
+    gate_results: tuple[GateResult, ...]
 
 
 class ScanBundleWriter:
@@ -76,8 +84,8 @@ class ScanBundleWriter:
         bundle.output_folder.mkdir(parents=True, exist_ok=False)
 
         self._write_text(bundle.summary_path, self._summary_markdown(request, bundle))
-        self._write_text(bundle.findings_path, self._findings_markdown())
-        self._write_text(bundle.manual_review_path, self._manual_review_markdown())
+        self._write_text(bundle.findings_path, self._findings_markdown(request))
+        self._write_text(bundle.manual_review_path, self._manual_review_markdown(request))
         self._write_text(
             bundle.codex_instructions_path,
             self._codex_instructions_markdown(request, bundle),
@@ -115,6 +123,17 @@ class ScanBundleWriter:
                 "## Checks Performed",
                 "",
                 "- Git diff capture",
+                *[
+                    f"- {result.gate}: {result.status}"
+                    for result in request.gate_results
+                ],
+                "",
+                "## Diff Scope",
+                "",
+                f"- Changed files: {len(request.parsed_diff.changed_files)}",
+                f"- Added lines scanned: {len(request.parsed_diff.added_lines)}",
+                f"- Automated findings: {len(request.findings)}",
+                f"- Manual review items: {len(_manual_review_findings(request.findings))}",
                 "",
                 "## Next Steps",
                 "",
@@ -123,53 +142,109 @@ class ScanBundleWriter:
             ]
         )
 
-    def _findings_markdown(self) -> str:
-        return "\n".join(
-            [
-                "# Findings",
-                "",
-                "No automated security gates have run yet.",
-                "",
-            ]
-        )
+    def _findings_markdown(self, request: ScanBundleRequest) -> str:
+        lines = [
+            "# Automated Gate Findings",
+            "",
+            "This is the combined partial report from all automated gates.",
+            "",
+        ]
 
-    def _manual_review_markdown(self) -> str:
-        return "\n".join(
+        if not request.findings:
+            lines.extend(["No automated gate findings were detected.", ""])
+            return "\n".join(lines)
+
+        for finding in request.findings:
+            lines.extend(_finding_markdown(finding))
+
+        return "\n".join(lines)
+
+    def _manual_review_markdown(self, request: ScanBundleRequest) -> str:
+        manual_review_findings = _manual_review_findings(request.findings)
+        lines = [
+            "# Manual Review",
+            "",
+        ]
+
+        if not manual_review_findings:
+            lines.extend(["No manual review items were detected.", ""])
+            return "\n".join(lines)
+
+        lines.extend(
             [
-                "# Manual Review",
-                "",
-                "No manual review checks have run yet.",
+                "Review these suspicious security-sensitive changes before treating "
+                "the diff as safe.",
                 "",
             ]
         )
+        for finding in manual_review_findings:
+            lines.extend(_finding_markdown(finding))
+
+        return "\n".join(lines)
 
     def _codex_instructions_markdown(
         self,
         request: ScanBundleRequest,
         bundle: ScanBundle,
     ) -> str:
+        changed_files = request.parsed_diff.changed_files
+        manual_review_findings = _manual_review_findings(request.findings)
+        file_lines = [f"- `{file_path}`" for file_path in changed_files]
+        finding_lines = [
+            f"- {_format_location(finding.file, finding.line)} "
+            f"[{finding.severity}] {finding.gate}: {finding.evidence}"
+            for finding in request.findings
+        ]
+        manual_lines = [
+            f"- {_format_location(finding.file, finding.line)}: {finding.evidence}"
+            for finding in manual_review_findings
+        ]
+
         return "\n".join(
             [
-                "# Codex Instructions",
+                "# Codex Handoff Prompt",
                 "",
-                "Review this Difend scan bundle before continuing the task.",
+                "Use this as the direct prompt for continuing the security review:",
+                "",
+                "You are reviewing a Difend scan bundle for security issues in the "
+                "current Git diff. Focus on the changed and added lines first. Do "
+                "not review unrelated old code unless it is needed to understand "
+                "the changed lines.",
                 "",
                 "## Context",
                 "",
                 f"- Status: {request.status}",
                 f"- Repository: {request.repository_path}",
-                f"- Diff: {bundle.diff_path}",
+                f"- Scan folder: {bundle.output_folder}",
+                f"- Diff patch: {bundle.diff_path}",
+                f"- Added lines scanned: {len(request.parsed_diff.added_lines)}",
+                "",
+                "## Files To Inspect",
+                "",
+                *(file_lines or ["- No changed files were detected."]),
+                "",
+                "## Automated Findings",
+                "",
+                *(finding_lines or ["- No automated findings were detected."]),
+                "",
+                "## Manual Review Focus",
+                "",
+                *(manual_lines or ["- No manual review items were detected."]),
                 "",
                 "## Suggested Action",
                 "",
-                "Inspect `diff.patch` first, then use `summary.md`, `findings.md`, "
-                "and `manual-review.md` as supporting context.",
+                "1. Read `diff.patch` to understand the exact scanned changes.",
+                "2. Read `findings.md` and verify each automated finding.",
+                "3. Read `manual-review.md` and inspect related code only where "
+                "needed to judge the changed lines.",
+                "4. Recommend a minimal fix for any confirmed issue, or explain why "
+                "the diff appears safe.",
                 "",
             ]
         )
 
     def _patch_text(self, diff: CodeDiff) -> str:
-        return diff.unstaged + diff.staged
+        return diff.patch_text
 
     def _report_json(
         self,
@@ -185,9 +260,16 @@ class ScanBundleWriter:
                 "has_changes": request.diff.has_changes,
                 "unstaged_bytes": len(request.diff.unstaged.encode()),
                 "staged_bytes": len(request.diff.staged.encode()),
+                "untracked_bytes": len(request.diff.untracked.encode()),
+                "changed_files": list(request.parsed_diff.changed_files),
+                "added_lines": len(request.parsed_diff.added_lines),
             },
-            "findings": [],
-            "manual_review": [],
+            "gates": [result.to_dict() for result in request.gate_results],
+            "findings": [finding.to_dict() for finding in request.findings],
+            "manual_review": [
+                finding.to_dict()
+                for finding in _manual_review_findings(request.findings)
+            ],
         }
 
     def _write_text(self, path: Path, content: str) -> None:
@@ -195,3 +277,31 @@ class ScanBundleWriter:
 
     def _write_json(self, path: Path, content: dict[str, Any]) -> None:
         path.write_text(json.dumps(content, indent=2) + "\n", encoding="utf-8")
+
+
+def _finding_markdown(finding: Finding) -> list[str]:
+    return [
+        f"## {_format_location(finding.file, finding.line)}",
+        "",
+        f"- Gate: {finding.gate}",
+        f"- Severity: {finding.severity}",
+        f"- Evidence: `{finding.evidence}`",
+        f"- Recommendation: {finding.recommendation}",
+        "",
+    ]
+
+
+def _manual_review_findings(findings: tuple[Finding, ...]) -> tuple[Finding, ...]:
+    return tuple(
+        finding
+        for finding in findings
+        if finding.requires_manual_review
+        or finding.severity == SEVERITY_MANUAL_REVIEW
+    )
+
+
+def _format_location(file_path: str, line: int | None) -> str:
+    if line is None:
+        return file_path
+
+    return f"{file_path}:{line}"
