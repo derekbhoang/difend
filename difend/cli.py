@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 from difend.commands.feedback import run_feedback
-from difend.commands.scan import run_scan
+from difend.commands.scan import run_agent_scan, run_scan
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,29 +16,35 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     scan_parser = subparsers.add_parser(
-        "agent-scan",
-        help="Scan the current Git diff.",
+        "scan",
+        help="Run deterministic Automated Gates over the current Git diff.",
     )
-    scan_parser.add_argument(
+    scan_parser.set_defaults(handler=run_scan)
+
+    agent_scan_parser = subparsers.add_parser(
+        "agent-scan",
+        help="Run the full agentic security scan over the current Git diff.",
+    )
+    agent_scan_parser.add_argument(
         "--no-cache",
         action="store_true",
         help="Disable scan cache lookup and writes for this run.",
     )
-    scan_parser.add_argument(
+    agent_scan_parser.add_argument(
         "--model",
         help="OpenAI model to use for LLM-backed agent nodes.",
     )
-    scan_parser.add_argument(
+    agent_scan_parser.add_argument(
         "--strict",
         action="store_true",
         help="Return a nonzero exit code when manual review is required.",
     )
-    scan_parser.add_argument(
+    agent_scan_parser.add_argument(
         "--agents",
         action="store_true",
         help="Print expanded per-agent execution details.",
     )
-    scan_parser.set_defaults(handler=run_scan)
+    agent_scan_parser.set_defaults(handler=run_agent_scan)
 
     feedback_parser = subparsers.add_parser(
         "feedback",

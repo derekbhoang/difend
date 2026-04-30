@@ -19,24 +19,28 @@ from difend.agents.schemas import (
 from difend.agents.utils import evidence_fingerprint, stable_short_hash
 
 
-GATES_VERSION = "2026-04-29.2"
+GATES_VERSION = "2026-04-29.3"
 
 SECRET_RE = re.compile(
     r"(?i)\b[\w-]*(api[_-]?key|secret|token|password|private[_-]?key)[\w-]*\b\s*[:=]\s*['\"][^'\"]{8,}['\"]"
 )
 SECRET_VALUE_RE = re.compile(
-    r"(?i)['\"](?:sk-proj-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})['\"]"
+    r"(?i)(?:['\"])?(?:sk-proj-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})(?:['\"])?|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
 )
-SHELL_RE = re.compile(r"\b(os\.system|subprocess\.(?:run|call|Popen)|exec\(|eval\()")
+SHELL_RE = re.compile(
+    r"\b(os\.system|os\.popen|subprocess\.(?:run|call|check_call|check_output|Popen)|exec\(|eval\()|\bshell\s*=\s*True\b"
+)
 SQL_RE = re.compile(
     r"(?i)(select|insert|update|delete).*(\+|f['\"]|\.format\(|%\s*\()"
 )
-WEAK_CRYPTO_RE = re.compile(r"(?i)\b(md5|sha1|des|rc4)\b")
+WEAK_CRYPTO_RE = re.compile(
+    r"(?i)\b(hashlib\.)?(md5|sha1)\s*\(|\b(des|rc4)\b|\bverify\s*=\s*False\b|\bssl\._create_unverified_context\s*\(|\brandom\.(?:random|randint|randrange|choice|choices)\s*\(.*\b(token|secret|password|passwd|pwd|session|key)\b|\b(token|secret|password|passwd|pwd|session|key)\b.*\brandom\.(?:random|randint|randrange|choice|choices)\s*\("
+)
 SENSITIVE_LOG_RE = re.compile(
     r"(?i)(log|logger|print)\s*\(.*(password|token|secret|api[_-]?key)"
 )
 DISABLED_AUTH_RE = re.compile(
-    r"(?i)(auth|permission|csrf|verify|validate).*(false|none|disabled|skip|bypass)"
+    r"(?i)(auth|permission|csrf|validate).*(false|none|disabled|skip|bypass)"
 )
 DEPENDENCY_FILES = {
     "requirements.txt",
@@ -45,7 +49,12 @@ DEPENDENCY_FILES = {
     "package-lock.json",
     "poetry.lock",
     "pipfile.lock",
+    "pnpm-lock.yaml",
+    "yarn.lock",
 }
+RISKY_DEPENDENCY_RE = re.compile(
+    r"(?i)\bhttps?://[^\s'\",)]+|\bgit\+(?:https?|ssh|git)://[^\s'\",)]+|\bgit://[^\s'\",)]+|\bfile:[^\s'\",)]+|(^|[=:\s'\"])\.\.?[/\\][^\s'\",)]+|\b[^\s'\",)]+\.(?:zip|tar|tar\.gz|tgz|whl)\b"
+)
 
 
 def run_automated_gates(
@@ -113,9 +122,29 @@ def find_gate_candidates(scan_context: ScanContext) -> list[GateCandidate]:
                     )
                 )
 
+    risky_dependency_files: set[str] = set()
     for changed_file in scan_context.changed_files:
         name = changed_file.path.lower().replace("\\", "/").split("/")[-1]
-        if name in DEPENDENCY_FILES and changed_file.added_lines:
+        if name not in DEPENDENCY_FILES:
+            continue
+        for added in changed_file.added_lines:
+            if RISKY_DEPENDENCY_RE.search(added.content):
+                risky_dependency_files.add(changed_file.path)
+                candidates.append(
+                    _candidate(
+                        vulnerability_type="dependency_risk",
+                        rule_id="dependency_direct_source",
+                        severity=Severity.MEDIUM,
+                        file=added.file,
+                        line=added.line,
+                        evidence=added.content.strip(),
+                        recommendation=(
+                            "Prefer pinned packages from trusted registries. "
+                            "Verify direct dependency sources before merging."
+                        ),
+                    )
+                )
+        if changed_file.path not in risky_dependency_files and changed_file.added_lines:
             candidates.append(
                 _candidate(
                     vulnerability_type="dependency_risk",
@@ -227,6 +256,7 @@ def _is_noise_controlled(vulnerability_type: str, file: str, content: str) -> bo
     ):
         return True
     if vulnerability_type in {
+        "hardcoded_secret",
         "weak_crypto",
         "disabled_auth_check",
     } and _is_scanner_rule_definition(file, content):

@@ -14,7 +14,7 @@ def test_sdk_no_diff_writes_bundle_without_api_key(tmp_path: Path, monkeypatch):
     report = DifendSDK().scan(ScanRequest(repository_path=tmp_path))
 
     assert report.status == ScanStatus.PASS
-    assert report.name == "difend agent-scan"
+    assert report.name == "difend scan"
     assert report.output_folder.exists()
     assert (report.output_folder / "report.json").exists()
     assert (report.output_folder / "agent-trace.json").exists()
@@ -26,7 +26,45 @@ def test_sdk_no_diff_writes_bundle_without_api_key(tmp_path: Path, monkeypatch):
     )
     assert report_json["trace_path"].endswith("agent-trace.json")
     assert "prepare_scan_context" in trace_json["trace"]
+    assert "automated_gates" in trace_json["trace"]
+    assert "OPENAI_API_KEY" not in os.environ
+
+
+def test_sdk_agent_scan_no_diff_writes_bundle_without_api_key(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    report = DifendSDK().agent_scan(ScanRequest(repository_path=tmp_path))
+
+    assert report.status == ScanStatus.PASS
+    assert report.name == "difend agent-scan"
+    assert report.output_folder.exists()
+    trace_json = json.loads(
+        (report.output_folder / "agent-trace.json").read_text(encoding="utf-8")
+    )
     assert "cache_lookup" in trace_json["trace"]
+    assert "OPENAI_API_KEY" not in os.environ
+
+
+def test_sdk_scan_detects_gates_findings_without_api_key(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "config.py").write_text(
+        "OPENAI_API_KEY = 'sk-proj-livevaluewithmanycharacters'\n",
+        encoding="utf-8",
+    )
+
+    report = DifendSDK().scan(ScanRequest(repository_path=tmp_path))
+
+    assert report.status == ScanStatus.FAIL
+    assert report.name == "difend scan"
+    assert report.findings
+    assert all(agent.used_llm is False for agent in report.agents)
     assert "OPENAI_API_KEY" not in os.environ
 
 
@@ -52,6 +90,31 @@ def test_scan_convenience_function_passes_model_and_cache_options(monkeypatch, t
     monkeypatch.setattr(sdk_module.DifendSDK, "scan", fake_scan)
 
     result = sdk_module.scan(
+        repository_path=tmp_path,
+        model="custom-model",
+        use_cache=False,
+    )
+
+    assert result is sentinel
+    assert captured["request"].repository_path == tmp_path
+    assert captured["request"].model == "custom-model"
+    assert captured["request"].use_cache is False
+
+
+def test_agent_scan_convenience_function_passes_model_and_cache_options(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+    sentinel = object()
+
+    def fake_agent_scan(self, request):
+        captured["request"] = request
+        return sentinel
+
+    monkeypatch.setattr(sdk_module.DifendSDK, "agent_scan", fake_agent_scan)
+
+    result = sdk_module.agent_scan(
         repository_path=tmp_path,
         model="custom-model",
         use_cache=False,

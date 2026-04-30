@@ -12,13 +12,13 @@ Teams need a lightweight workflow that checks only the code diff, catches common
 
 Difend is designed as a diff-aware AI security review SDK with a CLI entry point. The CLI gives developers quick terminal feedback, while the SDK coordinates focused review agents and produces a persistent scan bundle that can be read by developers, security reviewers, Codex, or another AI coding assistant.
 
-The scan bundle is not only a security report. It is structured context for follow-up work. After an AI coding tool generates a code change, `difend agent-scan` turns the current Git diff into Markdown and JSON files that explain what changed, which agents reviewed it, what problems were found, what needs manual review, and which files Codex should inspect next.
+The scan bundle is not only a security report. It is structured context for follow-up work. After an AI coding tool generates a code change, `difend scan` or `difend agent-scan` turns the current Git diff into Markdown and JSON files that explain what changed, which checks reviewed it, what problems were found, what needs manual review, and which files Codex should inspect next.
 
 ### Product Shape
 
 Difend has three connected layers:
 
-- **CLI:** `difend agent-scan` gives the developer immediate terminal feedback after a code change.
+- **CLI:** `difend scan` gives fast deterministic Automated Gates feedback, while `difend agent-scan` runs the full agentic workflow.
 - **SDK:** the reusable scan engine captures diffs, coordinates review agents, creates findings, and writes scan bundles.
 - **Context bundle:** the generated `.md`, `.patch`, and `.json` files give Codex or another AI coding tool focused security context for deeper review, explanation, or remediation.
 
@@ -85,7 +85,7 @@ The final status is deterministic:
 
 Configuration:
 
-- `OPENAI_API_KEY` is required only when a non-low-risk diff needs an LLM-backed agent.
+- `OPENAI_API_KEY` is never required for `difend scan`; it is required only when `difend agent-scan` needs an LLM-backed agent.
 - `DIFEND_OPENAI_MODEL` optionally overrides the default model, `gpt-5.4-mini`.
 - LangSmith tracing is optional and follows the standard LangChain environment variables when configured.
 
@@ -99,10 +99,16 @@ Difend focuses only on the code diff. It does not try to review the whole reposi
 2. Developer runs:
 
 ```bash
+difend scan
+```
+
+For the full agentic workflow, run:
+
+```bash
 difend agent-scan
 ```
 
-Useful flags:
+Useful `agent-scan` flags:
 
 ```bash
 difend agent-scan --no-cache
@@ -114,7 +120,7 @@ difend agent-scan --agents
 3. The command triggers the `difend SDK`.
 4. The `difend SDK` captures the current code diff from the Git working tree.
 5. Difend creates a scan output folder for the current run.
-6. The SDK sends the diff through the LangGraph agentic workflow:
+6. For `difend scan`, the SDK runs deterministic Automated Gates only. For `difend agent-scan`, the SDK sends the diff through the LangGraph agentic workflow:
 
 - **Diff Classifier Agent:** classifies the diff into fixed risk areas using heuristics first and optional LLM structured output.
 - **Automated Gates Agent:** detects concrete vulnerabilities in the diff, such as leaked secrets, vulnerable dependencies, injection risks, unsafe auth changes, weak cryptography, and sensitive data exposure.
@@ -136,7 +142,7 @@ difend agent-scan --agents
 
 The terminal output should be short, readable, and useful during normal development.
 
-Example:
+Agentic example:
 
 ```text
 Difend agent-scan started
@@ -169,6 +175,7 @@ Example:
       codex-instructions.md
       diff.patch
       report.json
+      agent-trace.json
 ```
 
 The final scan bundle should include:
@@ -190,6 +197,7 @@ Suggested file responsibilities:
 - `codex-instructions.md`: a focused prompt-style handoff file that tells Codex what was scanned, what needs deeper review, which files to inspect, and how to continue the developer's task safely.
 - `diff.patch`: the exact Git diff that Difend scanned.
 - `report.json`: structured machine-readable report for future integrations, CI, IDE plugins, and AI coding tools.
+- `agent-trace.json`: raw/intermediate scan trace for debugging agent and gate behavior.
 
 ### Context Handoff Contract
 
@@ -253,7 +261,7 @@ python -m pytest
 Difend stores local feedback under `.difend/feedback/`. Exact false-positive matches can be suppressed only when the finding or manual-review fingerprint matches.
 
 ```bash
-difend feedback --run-id <run-id> --finding-id <finding-id> --label false_positive
+difend feedback --run-id <run-id> --finding-id <finding-id> --label false_positive --reason "explain why this is a false positive"
 ```
 
 ## Resources

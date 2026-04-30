@@ -162,6 +162,99 @@ def test_real_secret_like_value_in_production_code_is_flagged():
     assert [candidate.rule_id for candidate in candidates] == ["secret_value_scan"]
 
 
+def test_gate_rules_detect_aws_github_and_private_key_secret_values():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/src/config.py b/src/config.py\n"
+                "--- a/src/config.py\n"
+                "+++ b/src/config.py\n"
+                "@@ -1,0 +1,3 @@\n"
+                "+AWS_KEY = 'AKIA1234567890ABCDEF'\n"
+                "+GITHUB_TOKEN = 'github_pat_1234567890abcdefghijklmnopqrstuvwxyz'\n"
+                "+KEY_HEADER = '-----BEGIN PRIVATE KEY-----'\n"
+            ),
+            staged="",
+        )
+    )
+
+    candidates = find_gate_candidates(context)
+
+    rule_ids = [candidate.rule_id for candidate in candidates]
+    assert rule_ids.count("secret_value_scan") == 3
+    assert "secret_scan" in rule_ids
+
+
+def test_gate_rules_detect_expanded_shell_execution_patterns():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/src/jobs.py b/src/jobs.py\n"
+                "--- a/src/jobs.py\n"
+                "+++ b/src/jobs.py\n"
+                "@@ -1,0 +1,3 @@\n"
+                "+subprocess.check_output(cmd, shell=True)\n"
+                "+os.popen(user_input)\n"
+                "+subprocess.check_call(['tool'])\n"
+            ),
+            staged="",
+        )
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [candidate.rule_id for candidate in candidates] == [
+        "shell_execution",
+        "shell_execution",
+        "shell_execution",
+    ]
+
+
+def test_gate_rules_detect_disabled_tls_verification():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/src/http.py b/src/http.py\n"
+                "--- a/src/http.py\n"
+                "+++ b/src/http.py\n"
+                "@@ -1,0 +1,2 @@\n"
+                "+requests.get(url, verify=False)\n"
+                "+ssl._create_unverified_context()\n"
+            ),
+            staged="",
+        )
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [candidate.rule_id for candidate in candidates] == [
+        "weak_crypto",
+        "weak_crypto",
+    ]
+
+
+def test_gate_rules_detect_risky_dependency_sources():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/requirements.txt b/requirements.txt\n"
+                "--- a/requirements.txt\n"
+                "+++ b/requirements.txt\n"
+                "@@ -1,0 +1,1 @@\n"
+                "+package @ git+https://example.com/package.git\n"
+            ),
+            staged="",
+        )
+    )
+
+    result, _ = run_automated_gates(context, None)
+
+    assert [finding.gate_name for finding in result.findings] == [
+        "dependency_direct_source",
+    ]
+    assert result.findings[0].severity == Severity.MEDIUM
+
+
 def test_dependency_finding_includes_gate_name():
     context = prepare_scan_context(
         CodeDiff(
@@ -193,6 +286,26 @@ def test_scanner_regex_definitions_are_not_flagged_as_crypto_or_auth_bypass():
                 "@@ -1,0 +1,2 @@\n"
                 "+WEAK_CRYPTO_RE = re.compile(r'(?i)\\\\b(md5|sha1|des|rc4)\\\\b')\n"
                 "+DISABLED_AUTH_RE = re.compile(r'auth.*(false|skip|bypass)')\n"
+            ),
+            staged="",
+        )
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert candidates == []
+
+
+def test_scanner_secret_regex_definitions_are_not_flagged():
+    context = prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                "diff --git a/difend/agents/gates.py b/difend/agents/gates.py\n"
+                "--- a/difend/agents/gates.py\n"
+                "+++ b/difend/agents/gates.py\n"
+                "@@ -1,0 +1,2 @@\n"
+                "+SECRET_VALUE_RE = re.compile(r'github_pat_[A-Za-z0-9_]{20,}')\n"
+                "+SECRET_RE = re.compile(r'api_key\\\\s*=\\\\s*[\\\"\\\\'][^\\\"\\\\']{8,}')\n"
             ),
             staged="",
         )
