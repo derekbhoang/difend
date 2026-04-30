@@ -1,5 +1,112 @@
 # Difend - Diff Defend
 
+Difend is a diff-aware security review CLI and Python SDK. It scans the current
+Git working-tree diff, catches concrete security issues with deterministic
+Automated Gates, and can run a full LangGraph/LangChain/OpenAI agentic security
+review when deeper reasoning is needed.
+
+## Quick Start
+
+### Install From PyPI
+
+```bash
+python -m pip install difend
+```
+
+If you want a specific release:
+
+```bash
+python -m pip install difend==0.1.1
+```
+
+### Install From Source
+
+```bash
+git clone https://github.com/derekbhoang/difend.git
+cd difend
+python -m venv .venv
+```
+
+On macOS or Linux:
+
+```bash
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+```
+
+### Run A Local Security Scan
+
+`difend scan` runs deterministic Automated Gates only. It does not require an
+OpenAI API key.
+
+```bash
+difend scan
+```
+
+Use this command for fast local feedback on hardcoded secrets, dependency risk,
+injection patterns, risky authentication or authorisation changes, unsafe file
+access, weak crypto, sensitive logging, and related concrete issues.
+
+### Run The Full Agentic Scan
+
+`difend agent-scan` runs the full multi-agent workflow. It may require an
+OpenAI API key when the diff is not confidently low risk.
+
+On macOS or Linux:
+
+```bash
+export OPENAI_API_KEY="your_api_key_here"
+difend agent-scan --agents
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:OPENAI_API_KEY="your_api_key_here"
+difend agent-scan --agents
+```
+
+You can also create a local `.env` file in the repository being scanned:
+
+```text
+OPENAI_API_KEY=your_api_key_here
+DIFEND_OPENAI_MODEL=gpt-5.4-mini
+```
+
+### Read The Scan Bundle
+
+Every run writes a bundle under `.difend/runs/<run-id>/`:
+
+```text
+summary.md
+findings.md
+manual-review.md
+codex-instructions.md
+diff.patch
+report.json
+agent-trace.json
+scan-log.jsonl
+```
+
+Start with `summary.md`, then use `codex-instructions.md` as the handoff prompt
+for Codex or another coding assistant.
+
+### Use As A Python SDK
+
+```python
+from difend import DifendSDK, ScanRequest, agent_scan, scan
+
+report = scan(repository_path=".")
+print(report.status)
+```
+
 ## Idea
 
 ### Pain Point
@@ -245,11 +352,20 @@ python -m pip install -r requirements-dev.txt
 python -m pip install -e .
 ```
 
-Configure OpenAI when model-backed nodes are needed:
+Configure OpenAI only when model-backed nodes are needed by `difend agent-scan`:
+
+On macOS or Linux:
 
 ```bash
-OPENAI_API_KEY=...
-DIFEND_OPENAI_MODEL=gpt-5.4-mini
+export OPENAI_API_KEY="your_api_key_here"
+export DIFEND_OPENAI_MODEL="gpt-5.4-mini"
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:OPENAI_API_KEY="your_api_key_here"
+$env:DIFEND_OPENAI_MODEL="gpt-5.4-mini"
 ```
 
 You can also put these values in a local `.env` file at the repository root:
@@ -318,6 +434,12 @@ python -m twine upload dist/*
 
 After a successful PyPI upload, do not reuse version `0.1.1`. Future package
 changes must bump the version, for example to `0.1.2`.
+
+Users can then install the published package with:
+
+```bash
+python -m pip install difend
+```
 
 ## Feedback
 
