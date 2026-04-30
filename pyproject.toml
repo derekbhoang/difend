@@ -4,6 +4,31 @@ version = "0.1.0"
 description = "Diff-aware security review CLI and SDK."
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Tony Hoang" },
+]
+keywords = [
+    "agents",
+    "code-review",
+    "diff",
+    "langchain",
+    "langgraph",
+    "security",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
     "langchain>=0.3.0",
     "langchain-openai>=0.2.0",
@@ -12,6 +37,10 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+[project.urls]
+Repository = "https://github.com/derekbhoang/difend"
+Issues = "https://github.com/derekbhoang/difend/issues"
+
 [project.scripts]
 difend = "difend.cli:main"
 
@@ -19,5 +48,5 @@ difend = "difend.cli:main"
 testpaths = ["tests"]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"

@@ -212,6 +212,8 @@ def find_gate_candidates(scan_context: ScanContext) -> list[GateCandidate]:
         if name not in DEPENDENCY_FILES:
             continue
         for added in changed_file.added_lines:
+            if _is_project_metadata_url(added.content):
+                continue
             if RISKY_DEPENDENCY_RE.search(added.content):
                 risky_dependency_files.add(changed_file.path)
                 candidates.append(
@@ -367,6 +369,16 @@ def _has_path_validation(content: str) -> bool:
         "commonpath",
     }
     return any(marker in lower for marker in validation_markers)
+
+
+def _is_project_metadata_url(content: str) -> bool:
+    return bool(
+        re.match(
+            r"\s*(?:Repository|Issues|Homepage|Documentation|Source|Changelog)\s*=\s*['\"]https?://",
+            content,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _is_permissive_cors(content: str) -> bool:

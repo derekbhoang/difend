@@ -267,6 +267,58 @@ Run tests:
 python -m pytest
 ```
 
+## Package And Publish
+
+Difend is packaged as both a Python SDK and a CLI. Installing the package exposes
+the `difend` command and the public SDK imports:
+
+```python
+from difend import DifendSDK, ScanRequest, agent_scan, scan
+```
+
+Validate the package locally before publishing:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
+python -m pytest
+python -m compileall difend
+python -m build
+python -m twine check dist/*
+```
+
+Publish to TestPyPI first:
+
+```powershell
+$env:TWINE_USERNAME="__token__"
+$env:TWINE_PASSWORD=(Read-Host "TestPyPI API token")
+python -m twine upload --repository testpypi dist/*
+```
+
+Then verify installation from TestPyPI in a clean virtual environment:
+
+```powershell
+python -m venv .venv-testpkg
+.\.venv-testpkg\Scripts\Activate.ps1
+$testPypi = "https://test.pypi.org/simple/"
+$pypi = "https://pypi.org/simple/"
+python -m pip install --index-url $testPypi --extra-index-url $pypi difend==0.1.0
+difend scan
+python -c "from difend import scan, agent_scan, DifendSDK; print('ok')"
+deactivate
+```
+
+Publish to real PyPI only after TestPyPI installation works:
+
+```powershell
+$env:TWINE_USERNAME="__token__"
+$env:TWINE_PASSWORD=(Read-Host "PyPI API token")
+python -m twine upload dist/*
+```
+
+After a successful PyPI upload, do not reuse version `0.1.0`. Future package
+changes must bump the version, for example to `0.1.1`.
+
 ## Feedback
 
 Difend stores local feedback under `.difend/feedback/`. Exact false-positive matches can be suppressed only when the finding or manual-review fingerprint matches.

@@ -495,3 +495,21 @@ def test_gate_rules_detect_risky_install_command():
     assert [candidate.rule_id for candidate in candidates] == [
         "dependency_install_command",
     ]
+
+
+def test_dependency_gate_ignores_pyproject_project_urls():
+    context = _context_from_added_lines(
+        "pyproject.toml",
+        [
+            'Repository = "https://github.com/derekbhoang/difend"',
+            'Issues = "https://github.com/derekbhoang/difend/issues"',
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [
+        candidate
+        for candidate in candidates
+        if candidate.rule_id == "dependency_direct_source"
+    ] == []
