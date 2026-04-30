@@ -18,6 +18,7 @@ from difend.agents.schemas import (
 )
 from difend.agents.utils import model_dump
 from difend.diff import CodeDiff
+from difend.observability import ScanEvent
 
 
 BUNDLE_FILE_NAMES = (
@@ -28,6 +29,7 @@ BUNDLE_FILE_NAMES = (
     "diff.patch",
     "report.json",
     "agent-trace.json",
+    "scan-log.jsonl",
 )
 
 
@@ -66,6 +68,10 @@ class ScanBundle:
     def agent_trace_path(self) -> Path:
         return self.output_folder / "agent-trace.json"
 
+    @property
+    def scan_log_path(self) -> Path:
+        return self.output_folder / "scan-log.jsonl"
+
 
 @dataclass(frozen=True)
 class ScanBundleRequest:
@@ -91,6 +97,7 @@ class ScanBundleRequest:
     context_hash: str = ""
     feedback_digest: str = ""
     trace: dict[str, Any] = field(default_factory=dict)
+    events: list[ScanEvent] = field(default_factory=list)
 
 
 class ScanBundleWriter:
@@ -115,8 +122,18 @@ class ScanBundleWriter:
         self._write_text(bundle.diff_path, self._patch_text(request.diff))
         self._write_json(bundle.report_path, self._report_json(request, bundle))
         self._write_json(bundle.agent_trace_path, self._agent_trace_json(request, bundle))
+        self.write_scan_log(bundle, request.events)
 
         return bundle
+
+    def write_scan_log(
+        self,
+        bundle: ScanBundle,
+        events: list[ScanEvent],
+    ) -> None:
+        lines = [json.dumps(event.model_dump(mode="json")) for event in events]
+        content = "\n".join(lines) + ("\n" if lines else "")
+        bundle.scan_log_path.write_text(content, encoding="utf-8")
 
     def _next_scan_id(self, output_root: Path) -> str:
         prefix = date.today().isoformat()
@@ -339,6 +356,7 @@ class ScanBundleWriter:
             "context_hash": request.context_hash,
             "feedback_digest": request.feedback_digest,
             "trace_path": str(bundle.agent_trace_path),
+            "log_path": str(bundle.scan_log_path),
         }
 
     def _agent_trace_json(

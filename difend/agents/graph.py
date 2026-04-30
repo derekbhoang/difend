@@ -7,7 +7,6 @@ from pathlib import Path
 
 from langgraph.graph import END, StateGraph
 
-from difend.diff import CodeDiff
 from difend.agents.cache import AgenticScanCache, CacheKey, context_hash
 from difend.agents.classifier import classify_diff
 from difend.agents.context import expand_context, prepare_scan_context
@@ -37,6 +36,8 @@ from difend.agents.schemas import (
 )
 from difend.agents.scoring import decide_status, merge_results, risk_score
 from difend.config import load_environment
+from difend.diff import CodeDiff
+from difend.observability import ScanObserver
 
 
 class AgenticScanError(RuntimeError):
@@ -49,6 +50,7 @@ def run_agentic_scan(
     model: str | None = None,
     model_client: StructuredModelClient | None = None,
     use_cache: bool = True,
+    observer: ScanObserver | None = None,
 ) -> AgenticScanResult:
     load_environment(repository_path)
     model_name = model or DEFAULT_MODEL
@@ -75,6 +77,7 @@ def run_agentic_scan(
                     "feedback_digest": feedback_digest,
                     "cache": cache,
                     "use_cache": use_cache,
+                    "observer": observer,
                 },
             }
         )
@@ -131,17 +134,23 @@ def build_graph():
 
 
 def _prepare_scan_context(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "prepare_scan_context")
     context = state["scan_context"]
-    agents = list(state.get("agents", []))
-    agents.append(
-        AgentExecution(
-            name="prepare_scan_context",
-            status=AgentStatus.COMPLETED,
-            detail=f"Prepared {len(context.changed_files)} changed file(s).",
-        )
+    execution = AgentExecution(
+        name="prepare_scan_context",
+        status=AgentStatus.COMPLETED,
+        detail=f"Prepared {len(context.changed_files)} changed file(s).",
+    )
+    _record_agent_event(
+        state,
+        execution,
+        metadata={
+            "changed_files": len(context.changed_files),
+            "added_lines": len(context.added_lines),
+        },
     )
     return {
-        "agents": agents,
+        "agents": [*state.get("agents", []), execution],
         "trace": _trace_update(
             state,
             "prepare_scan_context",
@@ -151,9 +160,19 @@ def _prepare_scan_context(state: AgentGraphState) -> AgentGraphState:
 
 
 def _diff_classifier(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "diff_classifier")
     metadata = state.get("metadata", {})
     client = metadata.get("model_client")
     classifier, execution = classify_diff(state["scan_context"], client)
+    _record_agent_event(
+        state,
+        execution,
+        metadata={
+            "risk_areas": [area.value for area in classifier.risk_areas],
+            "sensitive_files": len(classifier.sensitive_files),
+            "should_run_security_reasoning": classifier.should_run_security_reasoning,
+        },
+    )
     return {
         "classifier": classifier,
         "agents": [*state.get("agents", []), execution],
@@ -166,71 +185,69 @@ def _diff_classifier(state: AgentGraphState) -> AgentGraphState:
 
 
 def _orchestrator_route(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "orchestrator_route")
     classifier = state.get("classifier") or DiffClassifierResult(
         risk_areas=[RiskArea.LOW_RISK]
     )
+    route = (
+        "security_reasoning"
+        if classifier.should_run_security_reasoning
+        else "merge_after_gates"
+    )
+    execution = AgentExecution(
+        name="orchestrator_route",
+        status=AgentStatus.COMPLETED,
+        detail="Automated Gates will run; Security Reasoning is conditional.",
+    )
+    _record_agent_event(
+        state,
+        execution,
+        metadata={
+            "risk_areas": [area.value for area in classifier.risk_areas],
+            "route": route,
+        },
+    )
     return {
-        "agents": [
-            *state.get("agents", []),
-            AgentExecution(
-                name="orchestrator_route",
-                status=AgentStatus.COMPLETED,
-                detail="Automated Gates will run; Security Reasoning is conditional.",
-            ),
-        ],
+        "agents": [*state.get("agents", []), execution],
         "classifier": classifier,
         "trace": _trace_update(
             state,
             "orchestrator_route",
             {
                 "risk_areas": [area.value for area in classifier.risk_areas],
-                "should_run_security_reasoning": classifier.should_run_security_reasoning,
-                "route": "security_reasoning"
-                if classifier.should_run_security_reasoning
-                else "merge_after_gates",
-            },
-        ),
-    }
-
-
-def _automated_gates(state: AgentGraphState) -> AgentGraphState:
-    metadata = state.get("metadata", {})
-    client = metadata.get("model_client")
-    gates, execution = run_automated_gates(state["scan_context"], client)
-    return {
-        "gates": gates,
-        "agents": [*state.get("agents", []), execution],
-        "trace": _trace_update(
-            state,
-            "automated_gates",
-            {
-                "candidates": [candidate.model_dump(mode="json") for candidate in gates.candidates],
-                "llm_validation": gates.llm_validation.model_dump(mode="json")
-                if gates.llm_validation
-                else None,
-                "rejected_llm_outputs": gates.rejected_llm_outputs,
-                "findings": [finding.model_dump(mode="json") for finding in gates.findings],
+                "should_run_security_reasoning": (
+                    classifier.should_run_security_reasoning
+                ),
+                "route": route,
             },
         ),
     }
 
 
 def _context_expansion(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "context_expansion")
     expanded = expand_context(
         state["repository_path"],
         state["scan_context"],
         state["classifier"],
     )
+    execution = AgentExecution(
+        name="context_expansion",
+        status=AgentStatus.COMPLETED,
+        detail=f"Expanded {len(expanded.files)} context file(s).",
+    )
+    _record_agent_event(
+        state,
+        execution,
+        metadata={
+            "context_files": len(expanded.files),
+            "total_bytes": expanded.total_bytes,
+            "truncated": expanded.truncated,
+        },
+    )
     return {
         "expanded_context": expanded,
-        "agents": [
-            *state.get("agents", []),
-            AgentExecution(
-                name="context_expansion",
-                status=AgentStatus.COMPLETED,
-                detail=f"Expanded {len(expanded.files)} context file(s).",
-            ),
-        ],
+        "agents": [*state.get("agents", []), execution],
         "trace": _trace_update(
             state,
             "context_expansion",
@@ -240,6 +257,7 @@ def _context_expansion(state: AgentGraphState) -> AgentGraphState:
 
 
 def _cache_lookup(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "cache_lookup")
     metadata = state.get("metadata", {})
     feedback_digest = metadata.get("feedback_digest", state.get("feedback_digest", ""))
     expanded_context = state.get("expanded_context", ExpandedContext())
@@ -262,14 +280,11 @@ def _cache_lookup(state: AgentGraphState) -> AgentGraphState:
         cached_result = cache.get_by_digest(cache_digest)
         cache_reason = "hit" if cached_result else "miss"
 
-    agents = [
-        *state.get("agents", []),
-        AgentExecution(
-            name="cache_lookup",
-            status=AgentStatus.COMPLETED,
-            detail=f"Cache {cache_reason}.",
-        ),
-    ]
+    execution = AgentExecution(
+        name="cache_lookup",
+        status=AgentStatus.COMPLETED,
+        detail=f"Cache {cache_reason}.",
+    )
     trace_payload = {
         "cache_key": cache_digest,
         "context_hash": expanded_hash,
@@ -278,8 +293,9 @@ def _cache_lookup(state: AgentGraphState) -> AgentGraphState:
         "hit": cached_result is not None,
         "reason": cache_reason,
     }
+    _record_agent_event(state, execution, metadata=trace_payload)
     result: AgentGraphState = {
-        "agents": agents,
+        "agents": [*state.get("agents", []), execution],
         "cache_key": cache_digest,
         "context_hash": expanded_hash,
         "feedback_digest": feedback_digest,
@@ -297,6 +313,51 @@ def _cache_route(state: AgentGraphState) -> str:
     return "cache_miss"
 
 
+def _automated_gates(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "automated_gates")
+    metadata = state.get("metadata", {})
+    client = metadata.get("model_client")
+    gates, execution = run_automated_gates(state["scan_context"], client)
+    _record_agent_event(
+        state,
+        execution,
+        metadata={
+            "candidates": len(gates.candidates),
+            "findings": len(gates.findings),
+            "rejected_llm_outputs": len(gates.rejected_llm_outputs),
+        },
+    )
+    if not state["classifier"].should_run_security_reasoning:
+        _skip_event(
+            state,
+            "security_reasoning",
+            "Classifier did not route contextual security reasoning.",
+        )
+    return {
+        "gates": gates,
+        "agents": [*state.get("agents", []), execution],
+        "trace": _trace_update(
+            state,
+            "automated_gates",
+            {
+                "candidates": [
+                    candidate.model_dump(mode="json")
+                    for candidate in gates.candidates
+                ],
+                "llm_validation": (
+                    gates.llm_validation.model_dump(mode="json")
+                    if gates.llm_validation
+                    else None
+                ),
+                "rejected_llm_outputs": gates.rejected_llm_outputs,
+                "findings": [
+                    finding.model_dump(mode="json") for finding in gates.findings
+                ],
+            },
+        ),
+    }
+
+
 def _reasoning_route(state: AgentGraphState) -> str:
     classifier = state["classifier"]
     if classifier.should_run_security_reasoning:
@@ -305,6 +366,7 @@ def _reasoning_route(state: AgentGraphState) -> str:
 
 
 def _security_reasoning(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "security_reasoning")
     metadata = state.get("metadata", {})
     client = metadata.get("model_client")
     manual_review, execution, raw_result = run_security_reasoning(
@@ -314,6 +376,11 @@ def _security_reasoning(state: AgentGraphState) -> AgentGraphState:
         state.get("expanded_context", ExpandedContext()),
         client,
     )
+    _record_agent_event(
+        state,
+        execution,
+        metadata={"manual_review": len(manual_review)},
+    )
     return {
         "manual_review": manual_review,
         "agents": [*state.get("agents", []), execution],
@@ -321,16 +388,21 @@ def _security_reasoning(state: AgentGraphState) -> AgentGraphState:
             state,
             "security_reasoning",
             {
-                "raw_output": raw_result.model_dump(mode="json")
-                if raw_result is not None
-                else None,
-                "manual_review": [item.model_dump(mode="json") for item in manual_review],
+                "raw_output": (
+                    raw_result.model_dump(mode="json")
+                    if raw_result is not None
+                    else None
+                ),
+                "manual_review": [
+                    item.model_dump(mode="json") for item in manual_review
+                ],
             },
         ),
     }
 
 
 def _orchestrator_merge(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "orchestrator_merge")
     metadata = state.get("metadata", {})
     feedback_records = metadata.get("feedback_records", [])
     merged_findings, merged_review, covered_review = merge_results(
@@ -347,6 +419,24 @@ def _orchestrator_merge(state: AgentGraphState) -> AgentGraphState:
     )
     score = risk_score(active_findings, active_review)
     status = decide_status(active_findings, active_review)
+    execution = AgentExecution(
+        name="orchestrator_merge",
+        status=AgentStatus.COMPLETED,
+        detail="Merged outputs, enforced priority, and removed overlap.",
+    )
+    _record_agent_event(
+        state,
+        execution,
+        metadata={
+            "active_findings": len(active_findings),
+            "active_manual_review": len(active_review),
+            "covered_manual_review": len(covered_review),
+            "suppressed_findings": len(suppressed_findings),
+            "suppressed_manual_review": len(suppressed_review),
+            "risk_score": score,
+            "status": status,
+        },
+    )
     return {
         "gates": state["gates"].model_copy(update={"findings": active_findings}),
         "manual_review": active_review,
@@ -355,19 +445,14 @@ def _orchestrator_merge(state: AgentGraphState) -> AgentGraphState:
         "suppressed_manual_review": suppressed_review,
         "risk_score": score,
         "status": status,
-        "agents": [
-            *state.get("agents", []),
-            AgentExecution(
-                name="orchestrator_merge",
-                status=AgentStatus.COMPLETED,
-                detail="Merged outputs, enforced priority, and removed overlap.",
-            ),
-        ],
+        "agents": [*state.get("agents", []), execution],
         "trace": _trace_update(
             state,
             "orchestrator_merge",
             {
-                "active_findings": [finding.finding_id for finding in active_findings],
+                "active_findings": [
+                    finding.finding_id for finding in active_findings
+                ],
                 "active_manual_review": [
                     item.manual_review_id for item in active_review
                 ],
@@ -375,7 +460,8 @@ def _orchestrator_merge(state: AgentGraphState) -> AgentGraphState:
                     item.model_dump(mode="json") for item in covered_review
                 ],
                 "suppressed_findings": [
-                    finding.model_dump(mode="json") for finding in suppressed_findings
+                    finding.model_dump(mode="json")
+                    for finding in suppressed_findings
                 ],
                 "suppressed_manual_review": [
                     item.model_dump(mode="json") for item in suppressed_review
@@ -388,6 +474,7 @@ def _orchestrator_merge(state: AgentGraphState) -> AgentGraphState:
 
 
 def _handoff(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "handoff")
     metadata = state.get("metadata", {})
     client = metadata.get("model_client")
     handoff, execution = run_handoff(
@@ -397,6 +484,15 @@ def _handoff(state: AgentGraphState) -> AgentGraphState:
         state.get("manual_review", []),
         state["status"],
         client,
+    )
+    _record_agent_event(
+        state,
+        execution,
+        metadata={
+            "inspect_next": len(handoff.inspect_next),
+            "codex_tasks": len(handoff.codex_tasks),
+            "checklist": len(handoff.checklist),
+        },
     )
     return {
         "handoff": handoff,
@@ -410,15 +506,19 @@ def _handoff(state: AgentGraphState) -> AgentGraphState:
 
 
 def _orchestrator_finalize(state: AgentGraphState) -> AgentGraphState:
+    _start_event(state, "orchestrator_finalize")
+    execution = AgentExecution(
+        name="orchestrator_finalize",
+        status=AgentStatus.COMPLETED,
+        detail=f"Final status: {state['status']}.",
+    )
+    _record_agent_event(
+        state,
+        execution,
+        metadata={"status": state["status"], "cache_hit": False},
+    )
     return {
-        "agents": [
-            *state.get("agents", []),
-            AgentExecution(
-                name="orchestrator_finalize",
-                status=AgentStatus.COMPLETED,
-                detail=f"Final status: {state['status']}.",
-            ),
-        ],
+        "agents": [*state.get("agents", []), execution],
         "trace": _trace_update(
             state,
             "orchestrator_finalize",
@@ -428,15 +528,31 @@ def _orchestrator_finalize(state: AgentGraphState) -> AgentGraphState:
 
 
 def _orchestrator_finalize_cached(state: AgentGraphState) -> AgentGraphState:
+    for phase in (
+        "automated_gates",
+        "security_reasoning",
+        "orchestrator_merge",
+        "handoff",
+    ):
+        _skip_event(
+            state,
+            phase,
+            "Skipped because a cached scan result was reused.",
+            metadata={"cache_hit": True},
+        )
+
+    _start_event(state, "orchestrator_finalize")
     cached = state["cached_result"]
-    agents = [
-        *state.get("agents", []),
-        AgentExecution(
-            name="orchestrator_finalize",
-            status=AgentStatus.COMPLETED,
-            detail=f"Final status from cache: {cached.status}.",
-        ),
-    ]
+    execution = AgentExecution(
+        name="orchestrator_finalize",
+        status=AgentStatus.COMPLETED,
+        detail=f"Final status from cache: {cached.status}.",
+    )
+    _record_agent_event(
+        state,
+        execution,
+        metadata={"status": cached.status, "cache_hit": True},
+    )
     trace = _trace_update(
         state,
         "orchestrator_finalize",
@@ -447,7 +563,7 @@ def _orchestrator_finalize_cached(state: AgentGraphState) -> AgentGraphState:
         },
     )
     return {
-        "agents": agents,
+        "agents": [*state.get("agents", []), execution],
         "trace": trace,
         "cache_hit": True,
     }
@@ -500,6 +616,40 @@ def _trace_update(
     trace = dict(state.get("trace", {}))
     trace[node_name] = payload
     return trace
+
+
+def _start_event(state: AgentGraphState, phase: str) -> None:
+    observer = _observer(state)
+    if observer is not None:
+        observer.start(phase)
+
+
+def _record_agent_event(
+    state: AgentGraphState,
+    execution: AgentExecution,
+    *,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    observer = _observer(state)
+    if observer is not None:
+        observer.record_agent(execution, metadata=metadata)
+
+
+def _skip_event(
+    state: AgentGraphState,
+    phase: str,
+    message: str,
+    *,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    observer = _observer(state)
+    if observer is not None:
+        observer.skip(phase, message, metadata=metadata)
+
+
+def _observer(state: AgentGraphState) -> ScanObserver | None:
+    metadata = state.get("metadata", {})
+    return metadata.get("observer")
 
 
 def _optional_model_client() -> StructuredModelClient | None:

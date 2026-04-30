@@ -35,3 +35,5 @@ def test_bundle_writes_gate_name_to_markdown_and_report_json(tmp_path: Path):
 
     assert "- Gate: secret_scan" in findings_markdown
     assert report["findings"][0]["gate_name"] == "secret_scan"
+    assert report["log_path"].endswith("scan-log.jsonl")
+    assert bundle.scan_log_path.exists()

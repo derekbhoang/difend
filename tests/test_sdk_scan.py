@@ -18,13 +18,23 @@ def test_sdk_no_diff_writes_bundle_without_api_key(tmp_path: Path, monkeypatch):
     assert report.output_folder.exists()
     assert (report.output_folder / "report.json").exists()
     assert (report.output_folder / "agent-trace.json").exists()
+    assert (report.output_folder / "scan-log.jsonl").exists()
     report_json = json.loads(
         (report.output_folder / "report.json").read_text(encoding="utf-8")
     )
     trace_json = json.loads(
         (report.output_folder / "agent-trace.json").read_text(encoding="utf-8")
     )
+    log_events = [
+        json.loads(line)
+        for line in (report.output_folder / "scan-log.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
     assert report_json["trace_path"].endswith("agent-trace.json")
+    assert report_json["log_path"].endswith("scan-log.jsonl")
+    assert log_events[0]["progress_percent"] == 0
+    assert log_events[-1]["progress_percent"] == 100
     assert "prepare_scan_context" in trace_json["trace"]
     assert "automated_gates" in trace_json["trace"]
     assert "OPENAI_API_KEY" not in os.environ
@@ -42,10 +52,19 @@ def test_sdk_agent_scan_no_diff_writes_bundle_without_api_key(
     assert report.status == ScanStatus.PASS
     assert report.name == "difend agent-scan"
     assert report.output_folder.exists()
+    assert (report.output_folder / "scan-log.jsonl").exists()
     trace_json = json.loads(
         (report.output_folder / "agent-trace.json").read_text(encoding="utf-8")
     )
+    log_events = [
+        json.loads(line)
+        for line in (report.output_folder / "scan-log.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
     assert "cache_lookup" in trace_json["trace"]
+    assert log_events[-1]["phase"] == "bundle_write"
+    assert log_events[-1]["progress_percent"] == 100
     assert "OPENAI_API_KEY" not in os.environ
 
 

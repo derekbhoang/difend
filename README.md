@@ -12,14 +12,14 @@ Teams need a lightweight workflow that checks only the code diff, catches common
 
 Difend is designed as a diff-aware AI security review SDK with a CLI entry point. The CLI gives developers quick terminal feedback, while the SDK coordinates focused review agents and produces a persistent scan bundle that can be read by developers, security reviewers, Codex, or another AI coding assistant.
 
-The scan bundle is not only a security report. It is structured context for follow-up work. After an AI coding tool generates a code change, `difend scan` or `difend agent-scan` turns the current Git diff into Markdown and JSON files that explain what changed, which checks reviewed it, what problems were found, what needs manual review, and which files Codex should inspect next.
+The scan bundle is not only a security report. It is structured context for follow-up work. After an AI coding tool generates a code change, `difend scan` or `difend agent-scan` turns the current Git diff into Markdown and JSON files that explain what changed, which checks reviewed it, what problems were found, what needs manual review, and which files Codex should inspect next. Each run also writes a structured `scan-log.jsonl` event timeline for observability.
 
 ### Product Shape
 
 Difend has three connected layers:
 
 - **CLI:** `difend scan` gives fast deterministic Automated Gates feedback, while `difend agent-scan` runs the full agentic workflow.
-- **SDK:** the reusable scan engine captures diffs, coordinates review agents, creates findings, and writes scan bundles.
+- **SDK:** the reusable scan engine captures diffs, coordinates review agents, creates findings, emits progress events, and writes scan bundles.
 - **Context bundle:** the generated `.md`, `.patch`, and `.json` files give Codex or another AI coding tool focused security context for deeper review, explanation, or remediation.
 
 This means Difend supports two workflows at the same time: quick local security feedback for the developer, and better context awareness for AI coding tools that continue the task.
@@ -127,7 +127,7 @@ difend agent-scan --agents
 - **Security Reasoning Agent:** conditionally analyzes deeper contextual risk and outputs manual-review items only.
 - **Handoff Agent:** prepares the Codex follow-up instructions so the developer can continue safely without re-explaining the scan context.
 
-7. Difend prints progress in the terminal while each check runs.
+7. Difend prints a percentage progress bar in the terminal while each check runs.
 8. Difend waits for the agents to finish.
 9. Difend combines the agent results into one final security report and context handoff.
 10. Difend writes the final output into the scan folder as Markdown files, the exact scanned patch, and machine-readable JSON.
@@ -147,15 +147,23 @@ Agentic example:
 ```text
 Difend agent-scan started
 
-Checking git diff... done
-Running Diff Classifier Agent... done
-Running Automated Gates Agent... done
-Running Context Expansion... done
-Running Security Reasoning Agent... manual review required
-Running Handoff Agent... done
+[----------------] 0% scan started - Difend agent-scan started.
+[#---------------] 8% diff_capture completed - Captured unstaged diff.
+[###-------------] 17% prepare_scan_context completed - Prepared 1 changed file(s).
+[####------------] 25% diff_classifier completed - Classified diff with LLM structured output.
+[#####-----------] 33% orchestrator_route completed - Automated Gates will run; Security Reasoning is conditional.
+[#######---------] 42% context_expansion completed - Expanded 1 context file(s).
+[########--------] 50% cache_lookup completed - Cache miss.
+[#########-------] 58% automated_gates completed - Detected 1 concrete finding(s).
+[###########-----] 67% security_reasoning completed - Produced 1 manual review item(s).
+[############----] 75% orchestrator_merge completed - Merged outputs, enforced priority, and removed overlap.
+[#############---] 83% handoff completed - Generated handoff from merged scan result.
+[###############-] 92% orchestrator_finalize completed - Final status: manual review required.
+[################] 100% bundle_write completed - Wrote scan bundle to .difend/runs/2026-04-29-001.
 
 Status: manual review required
 Report written to: .difend/runs/2026-04-29-001/
+Log written to: .difend/runs/2026-04-29-001/scan-log.jsonl
 Next: ask Codex to read .difend/runs/2026-04-29-001/codex-instructions.md
 ```
 
@@ -176,6 +184,7 @@ Example:
       diff.patch
       report.json
       agent-trace.json
+      scan-log.jsonl
 ```
 
 The final scan bundle should include:
@@ -187,6 +196,7 @@ The final scan bundle should include:
 - Manual review checklist
 - Handoff Agent Codex follow-up instructions
 - The exact diff that was scanned
+- A structured JSONL event log for scan and agent observability
 - Final status: pass, fail, or manual review required
 
 Suggested file responsibilities:
@@ -198,6 +208,7 @@ Suggested file responsibilities:
 - `diff.patch`: the exact Git diff that Difend scanned.
 - `report.json`: structured machine-readable report for future integrations, CI, IDE plugins, and AI coding tools.
 - `agent-trace.json`: raw/intermediate scan trace for debugging agent and gate behavior.
+- `scan-log.jsonl`: timestamped scan events with phase status, progress percentage, duration, LLM usage, and metadata.
 
 ### Context Handoff Contract
 

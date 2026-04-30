@@ -5,6 +5,7 @@ from difend.agents import AgenticScanError
 from difend.agents.schemas import AgentExecution, AgentStatus
 from difend.commands import scan as scan_command
 from difend.diff import CodeDiff
+from difend.observability import ScanObserver
 from difend.sdk import ScanReport, ScanStatus
 
 
@@ -19,7 +20,9 @@ def test_scan_command_uses_gates_only_sdk_scan(monkeypatch):
 
     exit_code = scan_command.run_scan(Namespace())
 
+    observer = captured.pop("observer")
     assert exit_code == 0
+    assert isinstance(observer, ScanObserver)
     assert captured == {}
 
 
@@ -41,7 +44,9 @@ def test_agent_scan_command_passes_model_and_cache_options(monkeypatch):
         )
     )
 
+    observer = captured.pop("observer")
     assert exit_code == 0
+    assert isinstance(observer, ScanObserver)
     assert captured == {"model": "custom-model", "use_cache": False}
 
 
@@ -117,11 +122,48 @@ def test_agents_flag_prints_expanded_agent_details(monkeypatch, capsys):
     assert "diff_classifier: completed  used_llm=true" in output
     assert "Cache hit: false" in output
     assert "Trace: .difend\\runs\\run-1\\agent-trace.json" in output
+    assert "Log: .difend\\runs\\run-1\\scan-log.jsonl" in output
 
 
-def _report(status: ScanStatus) -> ScanReport:
+def test_scan_command_prints_progress_percentages(monkeypatch, capsys):
+    def fake_scan(**kwargs):
+        observer = kwargs["observer"]
+        for phase in scan_command.SCAN_PHASES:
+            observer.complete(phase, f"{phase} done.")
+        return _report(ScanStatus.PASS, name="difend scan")
+
+    monkeypatch.setattr(scan_command, "scan", fake_scan)
+
+    exit_code = scan_command.run_scan(Namespace())
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "0% scan started" in output
+    assert "100% bundle_write completed" in output
+
+
+def test_agent_scan_command_prints_progress_percentages(monkeypatch, capsys):
+    def fake_agent_scan(**kwargs):
+        observer = kwargs["observer"]
+        for phase in scan_command.AGENT_SCAN_PHASES:
+            observer.complete(phase, f"{phase} done.")
+        return _report(ScanStatus.PASS)
+
+    monkeypatch.setattr(scan_command, "agent_scan", fake_agent_scan)
+
+    exit_code = scan_command.run_agent_scan(
+        Namespace(model=None, no_cache=False, strict=False, agents=False)
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "0% scan started" in output
+    assert "100% bundle_write completed" in output
+
+
+def _report(status: ScanStatus, name: str = "difend agent-scan") -> ScanReport:
     return ScanReport(
-        name="difend agent-scan",
+        name=name,
         scan_id="run-1",
         repository_path=Path("."),
         output_folder=Path(".difend") / "runs" / "run-1",
@@ -137,4 +179,5 @@ def _report(status: ScanStatus) -> ScanReport:
         ],
         cache_hit=False,
         trace_path=Path(".difend") / "runs" / "run-1" / "agent-trace.json",
+        log_path=Path(".difend") / "runs" / "run-1" / "scan-log.jsonl",
     )

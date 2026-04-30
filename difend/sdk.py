@@ -28,6 +28,7 @@ from difend.agents.scoring import decide_status, risk_score
 from difend.bundle import ScanBundleRequest, ScanBundleWriter
 from difend.config import load_environment
 from difend.diff import CodeDiff, GitDiffCapture
+from difend.observability import AGENT_SCAN_PHASES, SCAN_PHASES, ScanObserver
 
 
 class ScanStatus(str, Enum):
@@ -49,6 +50,7 @@ class ScanRequest:
     include_untracked: bool = True
     model: str | None = None
     use_cache: bool = True
+    observer: ScanObserver | None = None
 
     @classmethod
     def from_path(
@@ -57,12 +59,14 @@ class ScanRequest:
         output_root: str | Path = ".difend/runs",
         model: str | None = None,
         use_cache: bool = True,
+        observer: ScanObserver | None = None,
     ) -> "ScanRequest":
         return cls(
             repository_path=Path(repository_path),
             output_root=Path(output_root),
             model=model,
             use_cache=use_cache,
+            observer=observer,
         )
 
 
@@ -92,6 +96,7 @@ class ScanReport:
     context_hash: str = ""
     feedback_digest: str = ""
     trace_path: Path | None = None
+    log_path: Path | None = None
     trace: dict[str, Any] = field(default_factory=dict)
 
 
@@ -100,10 +105,35 @@ class DifendSDK:
 
     def scan(self, request: ScanRequest) -> ScanReport:
         load_environment(request.repository_path)
+        observer = _ensure_observer(request.observer, "difend scan", SCAN_PHASES)
+        _start_phase(observer, "diff_capture")
         diff = self._capture_diff(request)
+        _complete_phase(
+            observer,
+            "diff_capture",
+            _diff_capture_detail(diff),
+            metadata=_diff_metadata(diff),
+        )
         scan_context = prepare_scan_context(diff)
+        _complete_phase(
+            observer,
+            "prepare_scan_context",
+            f"Prepared {len(scan_context.changed_files)} changed file(s).",
+            metadata={
+                "changed_files": len(scan_context.changed_files),
+                "added_lines": len(scan_context.added_lines),
+            },
+        )
         feedback_store = FeedbackStore(request.repository_path)
         gates, gates_execution = run_automated_gates(scan_context, model_client=None)
+        _record_agent(
+            observer,
+            gates_execution,
+            metadata={
+                "candidates": len(gates.candidates),
+                "findings": len(gates.findings),
+            },
+        )
         active_findings, suppressed_findings = apply_feedback(
             gates.findings,
             feedback_store.load(),
@@ -138,6 +168,20 @@ class DifendSDK:
                 detail=f"Final status: {status.value}.",
             ),
         ]
+        _record_agent(observer, agents[2])
+        _record_agent(
+            observer,
+            handoff_execution,
+            metadata={
+                "inspect_next": len(handoff.inspect_next),
+                "codex_tasks": len(handoff.codex_tasks),
+            },
+        )
+        _record_agent(
+            observer,
+            agents[-1],
+            metadata={"status": status.value, "risk_score": score},
+        )
         trace = {
             "prepare_scan_context": {
                 "scan_context": scan_context.model_dump(mode="json"),
@@ -171,7 +215,8 @@ class DifendSDK:
             },
         }
         feedback_digest = feedback_store.digest()
-        bundle = ScanBundleWriter().write(
+        writer = ScanBundleWriter()
+        bundle = writer.write(
             ScanBundleRequest(
                 repository_path=request.repository_path,
                 output_root=request.output_root,
@@ -186,8 +231,16 @@ class DifendSDK:
                 cache_hit=False,
                 feedback_digest=feedback_digest,
                 trace=trace,
+                events=observer.events,
             )
         )
+        _complete_phase(
+            observer,
+            "bundle_write",
+            f"Wrote scan bundle to {bundle.output_folder}.",
+            metadata={"output_folder": str(bundle.output_folder)},
+        )
+        writer.write_scan_log(bundle, observer.events)
 
         return ScanReport(
             name="difend scan",
@@ -205,21 +258,37 @@ class DifendSDK:
             cache_hit=False,
             feedback_digest=feedback_digest,
             trace_path=bundle.agent_trace_path,
+            log_path=bundle.scan_log_path,
             trace=trace,
         )
 
     def agent_scan(self, request: ScanRequest) -> ScanReport:
         load_environment(request.repository_path)
+        observer = _ensure_observer(
+            request.observer,
+            "difend agent-scan",
+            AGENT_SCAN_PHASES,
+        )
+        _start_phase(observer, "diff_capture")
         diff = self._capture_diff(request)
+        _complete_phase(
+            observer,
+            "diff_capture",
+            _diff_capture_detail(diff),
+            metadata=_diff_metadata(diff),
+        )
         model = request.model or os.getenv("DIFEND_OPENAI_MODEL") or DEFAULT_MODEL
+        observer.add_default_metadata({"model": model, "use_cache": request.use_cache})
         agentic_result = run_agentic_scan(
             request.repository_path,
             diff,
             model=model,
             use_cache=request.use_cache,
+            observer=observer,
         )
         status = ScanStatus(agentic_result.status)
-        bundle = ScanBundleWriter().write(
+        writer = ScanBundleWriter()
+        bundle = writer.write(
             ScanBundleRequest(
                 repository_path=request.repository_path,
                 output_root=request.output_root,
@@ -241,8 +310,16 @@ class DifendSDK:
                 context_hash=agentic_result.context_hash,
                 feedback_digest=agentic_result.feedback_digest,
                 trace=agentic_result.trace,
+                events=observer.events,
             )
         )
+        _complete_phase(
+            observer,
+            "bundle_write",
+            f"Wrote scan bundle to {bundle.output_folder}.",
+            metadata={"output_folder": str(bundle.output_folder)},
+        )
+        writer.write_scan_log(bundle, observer.events)
 
         return ScanReport(
             name="difend agent-scan",
@@ -267,6 +344,7 @@ class DifendSDK:
             context_hash=agentic_result.context_hash,
             feedback_digest=agentic_result.feedback_digest,
             trace_path=bundle.agent_trace_path,
+            log_path=bundle.scan_log_path,
             trace=agentic_result.trace,
         )
 
@@ -283,6 +361,7 @@ def scan(
     output_root: str | Path = ".difend/runs",
     model: str | None = None,
     use_cache: bool = True,
+    observer: ScanObserver | None = None,
 ) -> ScanReport:
     """Run deterministic Automated Gates through the default SDK instance."""
 
@@ -291,6 +370,7 @@ def scan(
         output_root=output_root,
         model=model,
         use_cache=use_cache,
+        observer=observer,
     )
     return DifendSDK().scan(request)
 
@@ -300,6 +380,7 @@ def agent_scan(
     output_root: str | Path = ".difend/runs",
     model: str | None = None,
     use_cache: bool = True,
+    observer: ScanObserver | None = None,
 ) -> ScanReport:
     """Run the full agentic Difend scan through the default SDK instance."""
 
@@ -308,5 +389,65 @@ def agent_scan(
         output_root=output_root,
         model=model,
         use_cache=use_cache,
+        observer=observer,
     )
     return DifendSDK().agent_scan(request)
+
+
+def _start_phase(observer: ScanObserver | None, phase: str) -> None:
+    if observer is not None:
+        observer.start(phase)
+
+
+def _complete_phase(
+    observer: ScanObserver | None,
+    phase: str,
+    detail: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if observer is not None:
+        observer.complete(phase, detail, metadata=metadata)
+
+
+def _record_agent(
+    observer: ScanObserver | None,
+    agent: AgentExecution,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if observer is not None:
+        observer.record_agent(agent, metadata=metadata)
+
+
+def _ensure_observer(
+    observer: ScanObserver | None,
+    command: str,
+    phases: tuple[str, ...],
+) -> ScanObserver:
+    active = observer or ScanObserver(command, phases)
+    if not active.events:
+        active.start_run(f"{command} started.")
+    return active
+
+
+def _diff_capture_detail(diff: CodeDiff) -> str:
+    captured = []
+    if diff.unstaged.strip():
+        captured.append("unstaged")
+    if diff.staged.strip():
+        captured.append("staged")
+    if diff.untracked.strip():
+        captured.append("untracked")
+    if not captured:
+        return "No Git diff was captured."
+    return f"Captured {', '.join(captured)} diff."
+
+
+def _diff_metadata(diff: CodeDiff) -> dict[str, Any]:
+    return {
+        "has_changes": diff.has_changes,
+        "unstaged_bytes": len(diff.unstaged.encode()),
+        "staged_bytes": len(diff.staged.encode()),
+        "untracked_bytes": len(diff.untracked.encode()),
+    }
