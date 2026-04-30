@@ -76,6 +76,38 @@ def test_low_risk_routing_skips_security_reasoning(tmp_path: Path):
     assert result.trace["cache_lookup"]["hit"] is False
 
 
+def test_agentic_scan_uses_improved_automated_gates(tmp_path: Path):
+    diff = CodeDiff(
+        unstaged=(
+            "diff --git a/test.py b/test.py\n"
+            "--- a/test.py\n"
+            "+++ b/test.py\n"
+            "@@ -1,0 +1,4 @@\n"
+            "+password TEXT\n"
+            "+cur.execute(\"INSERT INTO users (username, password) VALUES (?, ?)\", (username, password))\n"
+            "+cur.execute(\"SELECT * FROM users WHERE username = ? AND password = ?\", (username, password))\n"
+            "+app.run(debug=True)\n"
+        ),
+        staged="",
+    )
+
+    result = run_agentic_scan(
+        tmp_path,
+        diff,
+        model_client=FakeModel(),
+        use_cache=False,
+    )
+
+    finding_types = {finding.vulnerability_type for finding in result.gates.findings}
+    assert result.status == "fail"
+    assert {
+        "plaintext_password_storage",
+        "plaintext_password_insert",
+        "plaintext_password_comparison",
+        "debug_mode_enabled",
+    } <= finding_types
+
+
 def test_cache_hit_after_classifier_and_context_expansion(tmp_path: Path):
     diff = CodeDiff(
         unstaged=(

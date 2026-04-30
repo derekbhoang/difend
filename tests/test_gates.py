@@ -52,6 +52,22 @@ def _secret_diff():
     )
 
 
+def _context_from_added_lines(path: str, lines: list[str]):
+    added = "\n".join(f"+{line}" for line in lines)
+    return prepare_scan_context(
+        CodeDiff(
+            unstaged=(
+                f"diff --git a/{path} b/{path}\n"
+                f"--- a/{path}\n"
+                f"+++ b/{path}\n"
+                f"@@ -1,0 +1,{len(lines)} @@\n"
+                f"{added}\n"
+            ),
+            staged="",
+        )
+    )
+
+
 def test_gate_rules_create_candidates():
     context = prepare_scan_context(_secret_diff())
 
@@ -195,7 +211,7 @@ def test_gate_rules_detect_expanded_shell_execution_patterns():
                 "@@ -1,0 +1,3 @@\n"
                 "+subprocess.check_output(cmd, shell=True)\n"
                 "+os.popen(user_input)\n"
-                "+subprocess.check_call(['tool'])\n"
+                "+subprocess.run(command)\n"
             ),
             staged="",
         )
@@ -314,3 +330,168 @@ def test_scanner_secret_regex_definitions_are_not_flagged():
     candidates = find_gate_candidates(context)
 
     assert candidates == []
+
+
+def test_gate_rules_detect_plaintext_password_handling_and_debug_mode():
+    context = _context_from_added_lines(
+        "test.py",
+        [
+            "password TEXT",
+            'cur.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))',
+            'cur.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))',
+            "app.run(debug=True)",
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [candidate.vulnerability_type for candidate in candidates] == [
+        "plaintext_password_storage",
+        "plaintext_password_insert",
+        "plaintext_password_comparison",
+        "debug_mode_enabled",
+    ]
+
+
+def test_gate_rules_skip_safe_password_hashing_helpers():
+    context = _context_from_added_lines(
+        "auth.py",
+        [
+            "password_hash = generate_password_hash(password)",
+            "is_valid = check_password_hash(user.password_hash, password)",
+            "stored = bcrypt.hashpw(password.encode(), salt)",
+            "hashlib.pbkdf2_hmac('sha256', password, salt, 100000)",
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [
+        candidate.vulnerability_type
+        for candidate in candidates
+        if candidate.vulnerability_type.startswith("plaintext_password")
+    ] == []
+
+
+def test_gate_rules_detect_unsafe_deserialization_patterns():
+    context = _context_from_added_lines(
+        "views.py",
+        [
+            "obj = pickle.loads(request.data)",
+            "config = yaml.load(request.data)",
+            "value = marshal.loads(payload)",
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [candidate.vulnerability_type for candidate in candidates] == [
+        "unsafe_deserialization",
+        "unsafe_deserialization",
+        "unsafe_deserialization",
+    ]
+
+
+def test_gate_rules_allow_safe_yaml_loader():
+    context = _context_from_added_lines(
+        "views.py",
+        [
+            "config = yaml.safe_load(request.data)",
+            "config = yaml.load(request.data, Loader=yaml.SafeLoader)",
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [
+        candidate
+        for candidate in candidates
+        if candidate.vulnerability_type == "unsafe_deserialization"
+    ] == []
+
+
+def test_gate_rules_detect_template_and_nosql_injection():
+    context = _context_from_added_lines(
+        "views.py",
+        [
+            "return render_template_string(request.args['template'])",
+            'users.find({"$where": request.args["where"]})',
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [candidate.vulnerability_type for candidate in candidates] == [
+        "template_injection",
+        "nosql_injection",
+    ]
+
+
+def test_gate_rules_detect_open_redirect_and_path_traversal():
+    context = _context_from_added_lines(
+        "views.py",
+        [
+            'return redirect(request.args.get("next"))',
+            'return send_file(request.args["path"])',
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [candidate.vulnerability_type for candidate in candidates] == [
+        "open_redirect",
+        "path_traversal",
+    ]
+
+
+def test_gate_rules_skip_path_traversal_when_line_has_validation():
+    context = _context_from_added_lines(
+        "views.py",
+        [
+            'return send_file(safe_join(base_dir, request.args["path"]))',
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [
+        candidate
+        for candidate in candidates
+        if candidate.vulnerability_type == "path_traversal"
+    ] == []
+
+
+def test_gate_rules_detect_archive_cookie_cors_and_crypto_secret():
+    context = _context_from_added_lines(
+        "app.py",
+        [
+            "archive.extractall(upload_dir)",
+            "response.set_cookie('session', token, secure=False)",
+            'CORS(app, origins="*", supports_credentials=True)',
+            "AES_KEY = 'hardcoded-encryption-key'",
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [candidate.vulnerability_type for candidate in candidates] == [
+        "unsafe_archive_extraction",
+        "insecure_cookie",
+        "permissive_cors",
+        "hardcoded_crypto_key",
+    ]
+
+
+def test_gate_rules_detect_risky_install_command():
+    context = _context_from_added_lines(
+        "Dockerfile",
+        [
+            "RUN pip install git+https://example.com/package.git",
+        ],
+    )
+
+    candidates = find_gate_candidates(context)
+
+    assert [candidate.rule_id for candidate in candidates] == [
+        "dependency_install_command",
+    ]

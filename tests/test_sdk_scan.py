@@ -68,6 +68,57 @@ def test_sdk_scan_detects_gates_findings_without_api_key(tmp_path: Path, monkeyp
     assert "OPENAI_API_KEY" not in os.environ
 
 
+def test_sdk_scan_detects_sample_flask_security_bugs_without_api_key(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "test.py").write_text(
+        "\n".join(
+            [
+                "from flask import Flask, request",
+                "import sqlite3",
+                "app = Flask(__name__)",
+                "def init_db():",
+                "    conn = sqlite3.connect('users.db')",
+                "    cur = conn.cursor()",
+                "    cur.execute('''",
+                "        CREATE TABLE IF NOT EXISTS users (",
+                "            id INTEGER PRIMARY KEY AUTOINCREMENT,",
+                "            username TEXT UNIQUE,",
+                "            password TEXT",
+                "        )",
+                "    ''')",
+                "def register():",
+                "    username = request.form['username']",
+                "    password = request.form['password']",
+                "    cur.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, password))",
+                "def login():",
+                "    username = request.form['username']",
+                "    password = request.form['password']",
+                "    cur.execute('SELECT * FROM users WHERE username = ? AND password = ?', (username, password))",
+                "if __name__ == '__main__':",
+                "    app.run(debug=True)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = DifendSDK().scan(ScanRequest(repository_path=tmp_path))
+
+    finding_types = {finding.vulnerability_type for finding in report.findings}
+    assert report.status == ScanStatus.FAIL
+    assert {
+        "plaintext_password_storage",
+        "plaintext_password_insert",
+        "plaintext_password_comparison",
+        "debug_mode_enabled",
+    } <= finding_types
+    assert all(agent.used_llm is False for agent in report.agents)
+    assert "OPENAI_API_KEY" not in os.environ
+
+
 def test_scan_request_from_path_keeps_model_and_cache_options():
     request = ScanRequest.from_path(
         repository_path=".",

@@ -63,7 +63,7 @@ The Agent Orchestrator is deterministic LangGraph control flow. It routes work, 
 Difend uses four specialist agents:
 
 - **Diff Classifier Agent:** classifies changed files and added lines into fixed risk areas. It uses heuristics first and only calls the LLM when a diff is not confidently low risk.
-- **Automated Gates Agent:** checks the diff for concrete security problems such as hardcoded secrets, dangerous dependency changes, injection patterns, unsafe shell execution, weak cryptography, and sensitive data exposure.
+- **Automated Gates Agent:** checks the diff for concrete security problems such as hardcoded secrets, dangerous dependency changes, injection patterns, unsafe shell execution, unsafe deserialization, weak cryptography, plaintext password handling, insecure debug/config settings, path traversal, open redirects, permissive CORS, insecure cookies, and sensitive data exposure.
 - **Security Reasoning Agent:** looks for suspicious changes that may require deeper judgement, especially authentication, authorisation, privilege boundaries, sessions, personal data, database access, file access, payments, and cryptography. It outputs manual review items only.
 - **Handoff Agent:** turns the merged scan result into clear follow-up context for Codex or another AI coding assistant, including what was scanned, what was found, which files to inspect next, and the safest next action. It does not introduce new findings.
 
@@ -123,7 +123,7 @@ difend agent-scan --agents
 6. For `difend scan`, the SDK runs deterministic Automated Gates only. For `difend agent-scan`, the SDK sends the diff through the LangGraph agentic workflow:
 
 - **Diff Classifier Agent:** classifies the diff into fixed risk areas using heuristics first and optional LLM structured output.
-- **Automated Gates Agent:** detects concrete vulnerabilities in the diff, such as leaked secrets, vulnerable dependencies, injection risks, unsafe auth changes, weak cryptography, and sensitive data exposure.
+- **Automated Gates Agent:** detects concrete vulnerabilities in the diff, such as leaked secrets, vulnerable dependencies, injection risks, unsafe auth changes, plaintext password handling, unsafe deserialization, path traversal, weak cryptography, and sensitive data exposure.
 - **Security Reasoning Agent:** conditionally analyzes deeper contextual risk and outputs manual-review items only.
 - **Handoff Agent:** prepares the Codex follow-up instructions so the developer can continue safely without re-explaining the scan context.
 
