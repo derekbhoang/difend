@@ -302,7 +302,7 @@ python -m venv .venv-testpkg
 .\.venv-testpkg\Scripts\Activate.ps1
 $testPypi = "https://test.pypi.org/simple/"
 $pypi = "https://pypi.org/simple/"
-python -m pip install --index-url $testPypi --extra-index-url $pypi difend==0.1.0
+python -m pip install --index-url $testPypi --extra-index-url $pypi difend==0.1.1
 difend scan
 python -c "from difend import scan, agent_scan, DifendSDK; print('ok')"
 deactivate
@@ -316,8 +316,8 @@ $env:TWINE_PASSWORD=(Read-Host "PyPI API token")
 python -m twine upload dist/*
 ```
 
-After a successful PyPI upload, do not reuse version `0.1.0`. Future package
-changes must bump the version, for example to `0.1.1`.
+After a successful PyPI upload, do not reuse version `0.1.1`. Future package
+changes must bump the version, for example to `0.1.2`.
 
 ## Feedback
 
