@@ -1,0 +1,9 @@
+[project]
+name = "difend-vulnerable-demo"
+version = "0.0.1"
+dependencies = [
+    "django==1.11",
+    "flask==0.12",
+    "requests==2.19.0",
+    "pyyaml==3.13",
+]

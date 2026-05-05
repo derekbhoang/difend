@@ -1,0 +1,14 @@
+{
+  "name": "difend-vulnerable-demo",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "4.16.0",
+    "lodash": "4.17.4",
+    "jsonwebtoken": "7.4.0",
+    "serialize-javascript": "1.4.0"
+  }
+}

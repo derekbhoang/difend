@@ -19,6 +19,8 @@ OK
 
 ## Demo: Scan a Risky Diff
 
+For a larger ready-made demo, use `examples/vulnerable-demo/README.md`.
+
 Use a clean temporary repository as the scan target:
 
 ```bash
